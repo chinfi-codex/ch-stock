@@ -4,6 +4,7 @@ import pandas as pd
 import streamlit as st
 import json
 import akshare as ak
+import datetime
 
 from datas import spider, storager
 from datas.findata import EconomicIndicators
@@ -18,7 +19,7 @@ st.set_page_config(
     layout="wide",
 )
 
-news_tab, aly_tab, marco_tab = st.tabs(['电报200','新闻分析','宏观数据'])
+news_tab, follow_tab = st.tabs(['电报200','跟踪信息'])
 with news_tab:
     @st.cache_data(ttl="5m",show_spinner="加载中...")
     def write_news():
@@ -41,23 +42,7 @@ with news_tab:
         st.divider()
         
 
-# with aly_tab:
-#     newsTrends = NewsTrends()
-#     n1,n2 = st.columns([2,1])
-#     with n2:
-#         img = newsTrends.tag_cloud_img(height=800)
-#         st.image(img)
-    # with n1:
-    #     subjects = newsTrends.llm_tags_cluster()
-    #     subjects = subjects.sort_values('Word Count',ascending=False)
-    #     for i,row in subjects.iterrows():
-    #         st.write(row['Word Count'],row['Top Words'])
-    #         q_btn = st.button('Query',key=row['Topic'])
-    #         if q_btn:
-    #             rs = newsTrends.vector_query(row['Top Words'])
-    #             st.write(rs)
-
-with marco_tab:
+with follow_tab:
     col1,col2,col3,col4,col5=st.columns(5)
     with col1:
         try:
@@ -65,7 +50,8 @@ with marco_tab:
             rate = rate['5. Exchange Rate']
             rate = "{:.3f}".format(float(rate))
             st.metric('汇率',value=rate)
-            #history_rates = EconomicIndicators.get_exchangerates_daily(curDate=90)
+            history_rates = EconomicIndicators.get_exchangerates_daily(curDate=3)
+            st.write(history_rates)
         except Exception as e:
             st.write(e)
     with col2:
@@ -73,37 +59,55 @@ with marco_tab:
             ty_df = EconomicIndicators.get_treasury_yield()
             ty_0 = ty_df.loc[0,'value']
             st.metric('美10债',ty_0, delta_color='inverse')
+            st.write(ty_df.head(3))
         except Exception as e:
             st.write(e)
     with col3:
         try:
-            federal_df = EconomicIndicators.get_federal_rate()
-            federal_rate1 = federal_df.loc[0, 'value']
-            st.metric('美利率',federal_rate1, delta_color='inverse')
+            oils = EconomicIndicators.get_commodities('WTI')
+            oil1 = oils.loc[0,'value']
+            st.metric('WTI原油',oil1, delta_color='inverse')
+            st.write(oils.head(3))
         except Exception as e:
             st.write(e)
     with col4:
         try:
-            oils = EconomicIndicators.get_commodities('WTI')
-            oil1 = oils.loc[0,'value']
-            st.metric('WTI原油',oil1, delta_color='inverse')
+            gas = EconomicIndicators.get_commodities('natural_gas')
+            gas1 = gas.loc[0, 'value']
+            st.metric('天然气',gas1, delta_color='inverse')
+            st.write(gas.head(3))
         except Exception as e:
             st.write(e)
     with col5:
         try:
-            gas = EconomicIndicators.get_commodities('natural_gas')
-            gas1 = gas.loc[0, 'value']
-            st.metric('天然气',gas1, delta_color='inverse')
+            au99 = ak.spot_hist_sge(symbol='Au99.99').iloc[::-1].reset_index(drop=True)
+            au991 = au99.loc[0, 'close']
+            st.metric('沪金',au991, delta_color='inverse')
+            st.write(au99.head(3)[['date','close']])
         except Exception as e:
             st.write(e)
 
+    def write_tags_content(startdate, tags):
+        def news_fetcher(tag,startdate):
+            sql = f"""
+            SELECT * FROM NEWS_CLS
+            WHERE tags LIKE "%{tag}%" AND date BETWEEN '{startdate}' AND CURRENT_DATE
+            ORDER BY date DESC, time DESC
+            """
+            news_df = storager.mysql_retriever(sql)
+            return news_df
 
-    macro_ec = ak.macro_china_qyspjg().iloc[:12] # 国民经济
-    macro_financing = ak.macro_china_shrzgm().tail(30).iloc[::-1] #社融
-    macro_pmi = ak.macro_china_cx_pmi_yearly().tail(12).iloc[::-1] #财新PMI
-    st.write(macro_ec)
-    st.write(macro_financing)
-    st.write(macro_pmi)
+        for t in tags:
+            with st.expander(t):
+                news = news_fetcher(t,startdate)
+                for i,row in news.iterrows():
+                    st.write(row['date'])
+                    st.write(row['content'])
+
+    tags = ["经济数据","美国经济","俄乌","巴以冲突"]
+    startdate = datetime.date.today() - datetime.timedelta(days=5)
+    startdate_str = startdate.strftime("%Y-%m-%d")
+    write_tags_content(startdate_str, tags)
 
     
 
