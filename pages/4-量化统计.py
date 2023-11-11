@@ -60,9 +60,19 @@ class PriceData:
 
     def plotDayK(self, buy_date, container):
         try:
-            df = get_price(self.code,end_date=buy_date,count=60,frequency='1d')
-            df_tail = df.tail(1)
-            fail_zt = (df_tail.iloc[-1]['close'] < df_tail.iloc[-1]['high'])
+            next_tradeday = get_next_tradeday(buy_date)
+            df = get_price(self.code,end_date=next_tradeday,count=60,frequency='1d')
+            
+            # 隔日为买入当日，或隔日小于今天（周末情况）
+            if next_tradeday == buy_date or datetime.datetime.strptime(next_tradeday,'%Y-%m-%d') > datetime.datetime.today():
+                fail_zt = (df.iloc[-1]['close'] < df.iloc[-1]['high'])
+                next_high_pct = None
+                plot_df = df
+            # 正常：隔日大于买入当日
+            else:
+                fail_zt = (df.iloc[-2]['close'] < df.iloc[-2]['high'])
+                next_high_pct = round((df.iloc[-1]['high']/df.iloc[-2]['close'] -1),5)*100
+                plot_df = df.iloc[:-1]
             
             if fail_zt:
                 mc = mpf.make_marketcolors(up='black', down='darkgray', inherit=True)
@@ -70,10 +80,10 @@ class PriceData:
             else:
                 mc = mpf.make_marketcolors(up='r',down='g',inherit=True)
                 s  = mpf.make_mpf_style(marketcolors=mc,gridaxis='horizontal',gridstyle='dashed')
-            fig, axe = mpf.plot(df, type='candle', style=s,
+            fig, axe = mpf.plot(plot_df, type='candle', style=s,
                      volume=True,
                      returnfig=True)
-
+            if next_high_pct: container.write(f'隔日最高溢价:{next_high_pct}%')
             container.pyplot(fig)
         except Exception as e:
             print(e)
@@ -144,6 +154,7 @@ if st.button('当日买入图形'):
     for i in range(rows):
         # 创建一行列
         cols = st.columns(columns_per_row)
+        st.divider()
         for j in range(columns_per_row):
             # 计算当前元素在data_list中的索引
             index = i * columns_per_row + j
@@ -154,7 +165,6 @@ if st.button('当日买入图形'):
                 price_data = PriceData(code)
                 cols[j].write(name)
                 price_data.plotDayK(buy_date_select,cols[j])
-            break
 
 
 if st.button('买入次日表现'):
