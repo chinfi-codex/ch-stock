@@ -9,7 +9,6 @@ import datetime
 from datas import spider, storager
 from datas.findata import EconomicIndicators
 from datas.cninfo import cninfo_announcement_spider, get_stock_list
-from analysts import NewsTrends
 from tools.llm import get_chatgpt_chat
 
 
