@@ -62,13 +62,12 @@ class PriceData:
             self.code = code
 
     def buy_date_price(self, buy_date):
-        #df = get_price(self.code,end_date=buy_date,count=1,frequency='1d')
-        df = get_ak_price_df(self.code[2:],buy_date,count=1)
+        df = get_ak_price_df(self.code[2:],buy_date.strftime('%Y%m%d'),count=2)
         return df.to_dict('records')
 
     def next_tradeday_price(self, buy_date):
-        next_tradeday = get_next_tradeday(buy_date)
-        day_df = get_price(self.code,end_date=next_tradeday,count=1,frequency='1d')
+        next_tradeday = get_next_tradeday(buy_date).replace('-','')
+        day_df = get_ak_price_df(self.code[2:],next_tradeday,count=1)
         hour_df = ak.stock_zh_a_hist_min_em(self.code[2:],start_date=next_tradeday,end_date=next_tradeday,period='30')
         #hour_df = get_price(self.code,end_date=next_tradeday,count=8,frequency='30m')
         price_dict = {
@@ -76,7 +75,6 @@ class PriceData:
             'day': day_df.to_dict('records'),
             'hours': hour_df.to_dict('records') 
         }
-        print (price_dict)
         return price_dict
 
     def plotDayK(self, buy_date, container):
@@ -133,11 +131,7 @@ with data_tab:
     if st.button('当日买入数据'):
         def fail_zt(code):
             price = PriceData(code).buy_date_price(buy_date_select)
-            if len(price) > 1: 
-                i=1
-            else:
-                i = 0
-            return (price[i]['close'] < price[i]['high'])
+            return (price[-1]['close'] < price[-1]['high'])
 
         with st.spinner(''):
             buy_stocks_df = get_buy_datas(buy_date_select)
@@ -193,10 +187,10 @@ with data_tab:
     def caculate_hour_pct(code,buy_date,hour_index):
         price_data = PriceData(code)
         if i == 0:
-            hour_price = price_data.next_tradeday_price(buy_date)['day'][0]['open']
+            hour_price = price_data.next_tradeday_price(buy_date)['day'][-1]['open']
         else:
             hour_price = price_data.next_tradeday_price(buy_date)['hours'][i-1]['收盘']
-        lastclose_price = price_data.buy_date_price(buy_date)[0]['close']
+        lastclose_price = price_data.buy_date_price(buy_date)[-1]['close']
         return round((hour_price/lastclose_price - 1),5)*100
 
     if st.button('买入次日表现'):
@@ -208,7 +202,6 @@ with data_tab:
             hours = ['0925','1000','1030','1100','1130','1330','1400','1430','1500']
             for i in range(len(hours)):
                 df[hours[i]] = [caculate_hour_pct(row['code'], row['buy_date'], i) for index, row in df.iterrows()]
-            df.drop
             st.code(df)
 
             # 计算分时涨幅均值
