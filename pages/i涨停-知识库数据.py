@@ -121,7 +121,24 @@ if chatroom_file:
 #             pass       
 
 
+query = st.text_input('')
+if st.button('caida'):
+    from gradio_client import Client
+    def get_resp(query):
+        url = 'http://47.103.122.100:9412'
+        #url = "https://referqa.arslantu.xyz"
+        client = Client(url)
+        response = client.predict(
+            query, 
+            "ada",
+            "123", 
+            '',
+            api_name="/chat",
+        )
+        return response
 
+    resp = get_resp(query)
+    st.write(resp)
 
 
 

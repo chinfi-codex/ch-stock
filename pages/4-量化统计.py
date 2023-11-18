@@ -42,6 +42,16 @@ def get_buy_datas(buy_date=None):
     return df
 
 
+@st.cache_data(ttl='0.5d')
+def get_ak_price_df(code,end_date,count=60):
+    df = ak.stock_zh_a_hist(code,period="daily",end_date=end_date,adjust='').tail(count)
+    df.columns = ['date','open','close','high','low','volume_','volume','range','pct','pct_','change']
+    df = df[['date','open','close','high','low','volume']]
+    df['date'] = pd.to_datetime(df['date'])
+    df.set_index('date',inplace=True)
+    return df
+
+
 class PriceData:
     def __init__(self, code):
         if code.startswith('00') or code.startswith('3'):
@@ -52,7 +62,8 @@ class PriceData:
             self.code = code
 
     def buy_date_price(self, buy_date):
-        df = get_price(self.code,end_date=buy_date,count=1,frequency='1d')
+        #df = get_price(self.code,end_date=buy_date,count=1,frequency='1d')
+        df = get_ak_price_df(self.code[2:],buy_date,count=1)
         return df.to_dict('records')
 
     def next_tradeday_price(self, buy_date):
@@ -70,7 +81,7 @@ class PriceData:
 
     def plotDayK(self, buy_date, container):
         next_tradeday = get_next_tradeday(buy_date)
-        df = get_price(self.code,end_date=next_tradeday,count=60,frequency='1d')
+        df = get_ak_price_df(self.code[2:],next_tradeday.replace('-',''))
         try:  
             # 隔日为买入当日，或隔日小于今天（周末情况）
             if next_tradeday == buy_date or datetime.datetime.strptime(next_tradeday,'%Y-%m-%d') > datetime.datetime.today():
@@ -97,12 +108,13 @@ class PriceData:
         except Exception as e:
             print(e)
             print(df)
+            pass
 
 
 with st.expander('数据录入'):
     data_input = st.text_area('Input DATA:')
     if st.button('save'):
-        df = pd.read_csv(StringIO(data_input), delimiter='\t', engine='python').drop_duplicates()
+        df = pd.read_csv(StringIO(data_input), delimiter='\t', engine='python').drop_duplicates(subset='证券代码')
         df = df[['证券代码','时间']]
         df.columns = ['o_code','buy_time']
         df['code'] = df['o_code'].apply(lambda x:x.split('.')[0])
@@ -115,7 +127,7 @@ with st.expander('数据录入'):
         st.write(s)
 
 
-data_tab, yz_tab = st.tabs(['数据分析','游资研究'])
+data_tab, yz_tab, concept_tab = st.tabs(['数据分析','游资研究','THS概念板块'])
 with data_tab:
     buy_date_select = st.date_input('买入日期')
     if st.button('当日买入数据'):
@@ -146,8 +158,8 @@ with data_tab:
             buy_pct = round(len(buy_stocks_df) / (len(zt_all)+len(zt_fail_pool)),2)*100
             st.markdown(f'''
                 #### 买入数量:{len(buy_stocks_df)}\n
-                * 未封板率:{fail_pct}%\n
-                * 占全天收盘涨停比例:{str(buy_pct)}%\n
+                * 封板失败率:{fail_pct}%\n
+                * 买入占全天收盘涨停比例:{str(buy_pct)}%\n
                 ''')
             st.code(buy_stocks_df)
             st.markdown('未买入涨停股:')
@@ -196,6 +208,7 @@ with data_tab:
             hours = ['0925','1000','1030','1100','1130','1330','1400','1430','1500']
             for i in range(len(hours)):
                 df[hours[i]] = [caculate_hour_pct(row['code'], row['buy_date'], i) for index, row in df.iterrows()]
+            df.drop
             st.code(df)
 
             # 计算分时涨幅均值
@@ -218,6 +231,8 @@ with yz_tab:
         
         for i,row in df.iterrows():
             code = str(row.get('代码'))
+            if len(code) < 6:
+                code = (6-len(code))*'0'+code
             name = row.get('名称')
             date = row.get('date')
             buy_amount = row.get('买入')
@@ -231,6 +246,75 @@ with yz_tab:
                     price_data = PriceData(code)
                     price_data.plotDayK(date,st)
                 st.divider()
+
+
+with concept_tab:
+    @st.cache_data(ttl='1d')
+    def get_ths_concepts():
+        df = ak.stock_board_concept_name_ths()
+        df = df[['概念名称','代码']]
+        return df.to_dict('records')
+    
+    # concepts = get_ths_concepts()
+    # st.write(concepts)
+
+    def get_zt_stocks(date):
+        print(date)
+        zt_pool = ak.stock_zt_pool_em(date=date)
+        zt_pool = zt_pool[['代码','名称','成交额','总市值','换手率','首次封板时间']]
+        zt_fail_pool = ak.stock_zt_pool_zbgc_em(date=date)
+        zt_fail_pool = zt_fail_pool[['代码','名称','成交额','总市值','换手率','首次封板时间']]
+        zt_all_pool = pd.concat([zt_pool,zt_fail_pool])
+        
+        next_tradeday = get_next_tradeday(datetime.datetime.strptime(date,'%Y%m%d'))
+        print (next_tradeday)
+        if next_tradeday is not None:
+            next_tradeday = next_tradeday.replace('-','')
+        else:
+            return None
+        zt_all_pool['date'] = date
+        zt_all_pool.reset_index(inplace=True)
+        for index, row in zt_all_pool.iterrows():
+            dict_data = get_ak_price_df(row['代码'],next_tradeday,count=3).to_dict('records')
+            for key, value in dict_data[0].items():
+                zt_all_pool.at[index, 't-1 '+key] = value
+            for key, value in dict_data[1].items():
+                zt_all_pool.at[index, 't+0 '+key] = value
+            for key, value in dict_data[2].items():
+                zt_all_pool.at[index, 't+1 '+key] = value
+
+        return zt_all_pool
+
+    # if st.button('回测'):
+    #     start_date = '20231101'
+    #     zt_pool = ak.stock_zt_pool_em(date=start_date)
+
+    #     end_date = datetime.datetime.today().strftime('%Y%m%d')
+    #     date_range = pd.date_range(start=start_date, end=end_date, freq='D').strftime('%Y%m%d')
+
+    #     dfs = []
+    #     for date in date_range:
+    #         try:
+    #             result = get_zt_stocks(date)
+    #             if result is not None:
+    #                 dfs.append(result)
+    #         except Exception as e:
+    #             break
+
+            
+
+    #     all_pool = pd.concat(dfs)
+    #     st.write(all_pool)
+    #     all_pool.to_csv('backtrade_all_pool.csv')
+
+
+
+
+
+
+
+
+
 
 
 
