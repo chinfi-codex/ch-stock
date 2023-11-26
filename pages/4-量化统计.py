@@ -208,7 +208,7 @@ with data_tab:
 
 
 with yz_tab:
-    chair = st.selectbox('游资',['上塘路','养家','呼家楼','小鳄鱼'])
+    chair = st.selectbox('游资',['上塘路','养家','呼家楼','小鳄鱼','陈小群'])
     search_btn = st.button('go')
     if search_btn:
         df = pd.read_excel('datas/youzi.xlsx',sheet_name=chair)
@@ -269,7 +269,7 @@ with backtrade_tab:
         return zt_all_pool
 
     if st.button('每日涨停板统计'):
-        start_date = '20231101'
+        start_date = '20231120'
         zt_pool = ak.stock_zt_pool_em(date=start_date)
 
         end_date = datetime.datetime.today().strftime('%Y%m%d')

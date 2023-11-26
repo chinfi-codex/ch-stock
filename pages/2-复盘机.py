@@ -110,8 +110,7 @@ def collect_review_data(select_date):
     #今日涨停
     zt_pool = ak.stock_zt_pool_em(date=date)
     zt_300_pool = zt_pool[zt_pool['代码'].str.startswith('30')]
-    zt_688_pool = zt_pool[zt_pool['代码'].str.startswith('68')]
-    zt_8_pool = zt_pool[zt_pool['代码'].str.startswith('8')]
+    zt_688_pool = zt_pool[zt_pool['代码'].str.startswith('688')]
     
     zt_fail_pool = ak.stock_zt_pool_zbgc_em(date=date)
     zt_total_count = len(zt_pool)+len(zt_fail_pool)
@@ -120,7 +119,6 @@ def collect_review_data(select_date):
     zt_str += f'* 今日涨停数:{zt_total_count}\n'
     zt_str += f'  * 创业板涨停数:{len(zt_300_pool)}\n'
     zt_str += f'  * 科创板涨停数:{len(zt_688_pool)}\n'
-    zt_str += f'  * 北交所板涨停数:{len(zt_8_pool)}\n'
     zt_str += f'  * 炸板数:{zt_fail_count}，炸板率:{format_pct(zt_fail_count/zt_total_count*100)}\n'
 
     # dt_pool = ak.stock_zt_pool_dtgc_em(date=date)

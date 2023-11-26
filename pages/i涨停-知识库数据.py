@@ -122,25 +122,61 @@ if chatroom_file:
 
 
 query = st.text_input('')
-if st.button('caida'):
-    from gradio_client import Client
-    def get_resp(query):
-        url = 'http://47.103.122.100:9412'
-        #url = "https://referqa.arslantu.xyz"
-        client = Client(url)
-        response = client.predict(
-            query, 
-            "ada",
-            "123", 
-            '',
-            api_name="/chat",
-        )
-        return response
-
-    resp = get_resp(query)
-    st.write(resp)
+from gradio_client import Client
+import time
+def get_resp(query):
+    url = 'http://47.103.122.100:9412'
+    #url = "https://referqa.arslantu.xyz"
+    client = Client(url)
+    response = client.predict(
+        query, 
+        "ada",
+        "123", 
+        '',
+        api_name="/chat",
+    )
+    return response
 
 
+if st.button('test case'):
+    df = pd.read_excel('test.xlsx')
+    prompts = df['Prompt'].tolist()
+    answers = []
+    ms = []
+    for p in prompts:
+        t0 = time.time()
+        resp = get_resp(p)
+        ms.append(time.time()-t0)
+        answers.append(resp)
 
+    df['answer'] = answers
+    df['ms'] = ms
+    df.to_csv('test_case.csv')
+    st.write(answers)
+    st.write(ms)
+
+
+if st.button('fewshot test'):
+    df = pd.read_excel('test.xlsx')
+    dicts = df.to_dict('records')
+    for d in dicts:
+        qs = d.get('Prompt')
+        chuck = d.get('chuck')
+        prompt = f'''
+        你的背景知识:{chuck}
+
+        对话要求：
+        1. 背景知识是最新的
+        2. 使用背景知识回答问题。
+        3. 使用对话的风格回答我的问题，答案要和背景知识表述一致。
+        4. 回答字数不超过50个字
+        我的问题是:"{qs}"
+        ''' 
+        print(prompt)
+        t0 = time.time()
+        resp = get_resp(prompt)
+        st.write(time.time()-t0)
+        st.write(resp)
+        
 
 
