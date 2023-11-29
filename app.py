@@ -86,27 +86,44 @@ with follow_tab:
         except Exception as e:
             st.write(e)
 
-    def write_tags_content(startdate, tags):
-        def news_fetcher(tag,startdate):
+    tag_col,keyword_col = st.columns([1,1])
+    with tag_col:
+        def write_tags_content(startdate, tags):
+            for tag in tags:
+                sql = f"""
+                SELECT * FROM NEWS_CLS
+                WHERE tags LIKE "%{tag}%" AND date BETWEEN '{startdate}' AND CURRENT_DATE
+                ORDER BY date DESC, time DESC
+                """
+                news = storager.mysql_retriever(sql)
+                with st.expander(tag):
+                    for i,row in news.iterrows():
+                        st.write(row['date'])
+                        st.write(row['content'])
+
+        tags = ["经济数据","美国经济","俄乌","巴以冲突"]
+        startdate = datetime.date.today() - datetime.timedelta(days=5)
+        startdate_str = startdate.strftime("%Y-%m-%d")
+        write_tags_content(startdate_str, tags)
+
+    with keyword_col:
+        def write_keyword_content(startdate,keyword):
             sql = f"""
             SELECT * FROM NEWS_CLS
-            WHERE tags LIKE "%{tag}%" AND date BETWEEN '{startdate}' AND CURRENT_DATE
+            WHERE content LIKE '%{keyword}%' AND date BETWEEN '{startdate}' AND CURRENT_DATE
             ORDER BY date DESC, time DESC
             """
-            news_df = storager.mysql_retriever(sql)
-            return news_df
-
-        for t in tags:
-            with st.expander(t):
-                news = news_fetcher(t,startdate)
+            news = storager.mysql_retriever(sql)
+            with st.expander(keyword):
                 for i,row in news.iterrows():
                     st.write(row['date'])
                     st.write(row['content'])
 
-    tags = ["经济数据","美国经济","俄乌","巴以冲突"]
-    startdate = datetime.date.today() - datetime.timedelta(days=5)
-    startdate_str = startdate.strftime("%Y-%m-%d")
-    write_tags_content(startdate_str, tags)
+        keywords = ["华为","特斯拉","英伟达","苹果","马斯克"]
+        startdate = datetime.date.today() - datetime.timedelta(days=2)
+        startdate_str = startdate.strftime("%Y-%m-%d")
+        write_tags_content(startdate_str, keywords)
+
 
     
 

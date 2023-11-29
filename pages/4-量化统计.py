@@ -236,12 +236,6 @@ with yz_tab:
 
 
 with backtrade_tab:
-    @st.cache_data(ttl='1d')
-    def get_ths_concepts():
-        df = ak.stock_board_concept_name_ths()
-        df = df[['概念名称','代码']]
-        return df.to_dict('records')
-
     def get_zt_stocks(date):
         zt_pool = ak.stock_zt_pool_em(date=date)
         zt_pool = zt_pool[['代码','名称','成交额','总市值','换手率','首次封板时间']]
@@ -290,28 +284,7 @@ with backtrade_tab:
         st.write(all_pool)
         all_pool.to_csv('backtrade_all_pool.csv')
 
-    if st.button('指标选股'):
-        codes = []
-        all_stocks = get_stock_list()
-        all_codes = all_stocks['code'].tolist()
-        for code in all_codes:
-            try:
-                df = get_ak_price_df(code,datetime.datetime.today().strftime('%Y%m%d'))
-                df['MACD'], df['MACD_signal'], df['MACD_hist'] = macd(df['close'])
-                df['EMA_short'] = ema(df['close'], 12)
-                df['EMA_long'] = ema(df['close'], 26)
-                df['RSI'] = rsi(df['close'])
-                df['Boll_Upper'], df['Boll_Middle'], df['Boll_Lower'] = bollinger_bands(df['close'])
-
-                is_characteristic = evaluate_stock_characteristics(df)
-                if is_characteristic:
-                    st.write(code)
-                    codes.append(code)
-            except Exception as e:
-                print (code)
-                pass
-        selected_stocks = all_stocks[all_stocks['code'].isin(codes)]
-        st.write(selected_stocks)
+    
 
 
 
