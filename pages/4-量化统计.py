@@ -262,27 +262,26 @@ with backtrade_tab:
 
         return zt_all_pool
 
-    if st.button('每日涨停板统计'):
-        start_date = '20231120'
-        zt_pool = ak.stock_zt_pool_em(date=start_date)
+    # if st.button('每日涨停板统计'):
+    #     start_date = '20231120'
+    #     zt_pool = ak.stock_zt_pool_em(date=start_date)
 
-        end_date = datetime.datetime.today().strftime('%Y%m%d')
-        date_range = pd.date_range(start=start_date, end=end_date, freq='D').strftime('%Y%m%d')
+    #     end_date = datetime.datetime.today().strftime('%Y%m%d')
+    #     date_range = pd.date_range(start=start_date, end=end_date, freq='D').strftime('%Y%m%d')
 
-        dfs = []
-        for date in date_range:
-            try:
-                result = get_zt_stocks(date)
-                if result is not None:
-                    dfs.append(result)
-            except Exception as e:
-                break
+    #     dfs = []
+    #     for date in date_range:
+    #         try:
+    #             result = get_zt_stocks(date)
+    #             if result is not None:
+    #                 dfs.append(result)
+    #         except Exception as e:
+    #             break
 
             
 
-        all_pool = pd.concat(dfs)
-        st.write(all_pool)
-        all_pool.to_csv('backtrade_all_pool.csv')
+    #     all_pool = pd.concat(dfs)
+    #     st.write(all_pool)
 
     
 
