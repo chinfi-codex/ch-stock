@@ -38,6 +38,41 @@ def init_reviewer(images):
         parse_texts += result
 
 
+def get_stock_topics(stock_code):
+    headers = {
+        "Accept": "*/*",
+        "Accept-Encoding": "gzip, deflate, br",
+        "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8,zh-TW;q=0.7",
+        "Connection": "keep-alive",
+        "Cookie": "cookiesu=811699439006809; device_id=33db3ce3590f650811892f43e613f5ee; xq_is_login=1; u=4873962436; snbim_minify=true; s=au15qra156; bid=dae282ad1417f3f26c00a2c349cca9dd_lowjzlgx; __utmc=1; __utmz=1.1699953497.1.1.utmcsr=(direct)|utmccn=(direct)|utmcmd=(none); xq_a_token=949c332f97c485204c6d4cb2ed666fe7218d6f3f; xqat=949c332f97c485204c6d4cb2ed666fe7218d6f3f; xq_id_token=eyJ0eXAiOiJKV1QiLCJhbGciOiJSUzI1NiJ9.eyJ1aWQiOjQ4NzM5NjI0MzYsImlzcyI6InVjIiwiZXhwIjoxNzA0MTg2OTE0LCJjdG0iOjE3MDE1OTQ5MTQ4NjQsImNpZCI6ImQ5ZDBuNEFadXAifQ.D3Hop0_PYrFzsNkoY9KljJdptPC6UqHX8j6_6lS4oquqEyapU_oWhPfCY9nbPMW3w0eVZdVQ_MdYtsEU28p5iVplqlIGB3_prKjnXdPXcoOViHJ-DzNSOjbJULaG7YRbz-hPkV_OyWLmxzeKsqoxhLCoW0aY075pvknySFq2Y7s63OSO13j0TZSan95pICeiLEYM7de5U3ZV4W_jfQCYrbjIaiip_sGZs38XXmlnFsaRFV4Y4gFk6NQxCVnfGEMhhrhKQDA6vB-iBDO6RYRkIuVOWX4qKvBQoQFN_IxAxZhU-PLTOHCKEBWWNZtUTq0-78bTTF-8J9K2ikZ4BhlhHQ; xq_r_token=041e4a459e2c629395ceebef52a76039b016c336; __utma=1.2103389918.1699953497.1701266511.1701781508.10; Hm_lvt_1db88642e346389874251b5a1eded6e3=1702340456; Hm_lpvt_1db88642e346389874251b5a1eded6e3=1702636602; acw_tc=2760825f17026393823901137e1fd4a4628a53c37c94e3036e541d03a497f9; is_overseas=0",
+        "Host": "xueqiu.com",
+        "Referer": "https://xueqiu.com/S/SZ002862",
+        "Sec-Fetch-Dest": "empty",
+        "Sec-Fetch-Mode": "cors",
+        "Sec-Fetch-Site": "same-origin",
+        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36",
+        "X-Requested-With": "XMLHttpRequest",
+        "elastic-apm-traceparent": "00-7426507db4222b35e45c4963bd19951d-5e97387f380f0683-00",
+        "sec-ch-ua": '"Google Chrome";v="119", "Chromium";v="119", "Not?A_Brand";v="24"',
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": '"macOS"'
+    }
+
+    if stock_code.startswith('6'): 
+        stock_code = 'SH'+stock_code
+    else:
+        stock_code = 'SZ'+stock_code
+
+    topic_texts = []
+    for i in range(1,3):
+        url = f'https://xueqiu.com/query/v1/symbol/search/status.json?count=10&comment=0&symbol={stock_code}&hl=0&source=user&sort=time&page={str(i)}&q=&type=11'
+        topics = requests.get(url=url,headers=headers).json()['list']
+        for topic in topics:
+            if 'text' in topic.keys():
+                topic_texts.append(topic.get('text'))
+    return topic_texts
+
+
 def jd_product_comments(pid):
     headers = {
         "accept": "*/*",
@@ -93,7 +128,7 @@ def weibo_comments(wid):
             comments.append(text_raw)
     return comments
 
-
+ 
 # if st.button("中报筛选"):
 #     h1_report_df = ak.stock_yjbb_em(date="20230630")
 #     #h1_report_df = h1_report_df[['股票代码','股票简称', '营业收入-同比增长', '营业收入-季度环比增长', '净利润-同比增长', '净利润-季度环比增长','销售毛利率', '所处行业', '最新公告日期']]

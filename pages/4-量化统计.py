@@ -12,6 +12,7 @@ import mplfinance as mpf
 from datas.storager import mysql_retriever,mysql_storager
 from tools.quantity import *
 from datas.cninfo import get_stock_list
+from datas.useful import get_stock_topics
 
 
 st.set_page_config(
@@ -88,70 +89,91 @@ class PriceData:
                      returnfig=True)
             if next_high_pct: container.write(f'隔日最高溢价:{next_high_pct}%')
             container.pyplot(fig)
-            #plot_df.to_csv(f'{self.code}.csv')
         except Exception as e:
             print(e)
             print(df)
             pass
 
+    def plotIntervalK(self, buy_date, container=st):
+        df = ak.stock_zh_a_hist_min_em(self.code,period='1').tail(240)
+        df.columns = ['date','open','close','high','low','volume_','volume','lastprice']
+        df = df[['date','open','close','high','low','volume']]
+        df['date'] = pd.to_datetime(df['date'])
+        df.set_index('date',inplace=True)
+
+        mc = mpf.make_marketcolors(up='r',down='g',inherit=True)
+        s  = mpf.make_mpf_style(marketcolors=mc,gridaxis='horizontal',gridstyle='dashed')
+        fig, axe = mpf.plot(df, type='line', style=s, volume=True, returnfig=True)
+        container.pyplot(fig)
+
+
 
 with st.expander('数据录入'):
     data_input = st.text_area('Input DATA:')
-    if st.button('save'):
-        df = pd.read_csv(StringIO(data_input), delimiter='\t', engine='python').drop_duplicates(subset='证券代码')
-        df = df[['证券代码','时间']]
-        df.columns = ['o_code','buy_time']
-        df['code'] = df['o_code'].apply(lambda x:x.split('.')[0])
-        df['name'] = df['o_code'].apply(lambda x:re.search(r'\(([^)]*)\)', x).group(1))
-        df['buy_date'] = datetime.datetime.today().strftime('%Y-%m-%d')
-        df.drop('o_code', axis=1, inplace=True)
-        st.write(df)
+    # if st.button('save'):
+    #     df = pd.read_csv(StringIO(data_input), delimiter='\t', engine='python').drop_duplicates(subset='证券代码')
+    #     df = df[['证券代码','时间']]
+    #     df.columns = ['o_code','buy_time']
+    #     df['code'] = df['o_code'].apply(lambda x:x.split('.')[0])
+    #     df['name'] = df['o_code'].apply(lambda x:re.search(r'\(([^)]*)\)', x).group(1))
+    #     df['buy_date'] = datetime.datetime.today().strftime('%Y-%m-%d')
+    #     df.drop('o_code', axis=1, inplace=True)
+    #     st.write(df)
 
-        s = mysql_storager(df,'QT_DBLOG')
-        st.write(s)
+    #     s = mysql_storager(df,'QT_DBLOG')
+    #     st.write(s)
+
+    if st.button('qmt data'):
+        df = pd.read_csv(StringIO(data_input), delimiter='\t', engine='python').drop_duplicates(subset='证券名称')
+        df = df[['证券代码','证券名称','操作','成交日期','成交时间']]
+        
+        def plot_df_data(df):
+            for i,row in df.iterrows():
+                code = str(row.get('证券代码'))
+                if len(code) < 6:
+                    code = (6-len(code))*'0'+code
+                price_data = PriceData(code)
+
+                c1,c2,c3 = st.columns([1,1,1])
+                with c1: 
+                    st.write(row['证券名称'])
+                    st.write(row['成交时间'])
+                with c2:
+                    price_data.plotDayK(row['date'],st)
+                with c3:
+                    price_data.plotIntervalK(row['date'])
+                st.divider()
+
+        st.markdown('### 买入数据')
+        buy_df = df[df['操作'] == '买入'].sort_values('成交时间')
+        buy_df['date'] = pd.to_datetime(buy_df['成交日期'], format='%Y%m%d')
+        plot_df_data(buy_df)
+        
+        st.markdown('### 卖出数据')
+        sell_df = df[df['操作'] == '卖出'].sort_values('成交时间')
+        sell_df['date'] = pd.to_datetime(sell_df['成交日期'], format='%Y%m%d')
+        plot_df_data(sell_df)
+        
 
 
-data_tab, yz_tab, backtrade_tab = st.tabs(['数据分析','游资研究','回测分析'])
+data_tab, yz_tab, topic_tab = st.tabs(['数据分析','游资研究','大涨研究'])
 with data_tab:
     buy_date_select = st.date_input('买入日期')
-    if st.button('当日买入数据'):
-        def success_zt(code):
-            price = PriceData(code).buy_date_price(buy_date_select)
-            return (price[-1]['close'] == price[-1]['high'])
-
+    if st.button('当日涨停数据'):
         def highlight_buy_true(s):
-                return ['background-color: yellow' if s['buy'] else '' for _ in s]
+                return ['background-color: yellow' if s['涨停统计'] == '1/1' else '' for _ in s]
 
-        with st.spinner(''):
-            buy_stocks_df = get_buy_datas(buy_date_select)
-            buy_stocks_df['buy_time'] = buy_stocks_df['buy_time'].astype(str)
-
-            buy_stocks_df['success_zt'] = buy_stocks_df['code'].apply(lambda x:success_zt(x))
-            success_df = buy_stocks_df[buy_stocks_df['success_zt'] == True]
-            success_pct = round(len(success_df) / len(buy_stocks_df),2)*100
-            
+        with st.spinner(''):            
             date = str(buy_date_select).replace('-','')
             zt_all_df = ak.stock_zt_pool_em(date=date)
             zt_all_df = zt_all_df[['代码','名称','首次封板时间','炸板次数','涨停统计','连板数']]
-            #zt_all_df['一字板'] = 
-            zt_all_df['buy'] = zt_all_df['代码'].apply(lambda x:x in buy_stocks_df['code'].tolist())
-
-            hl_zt_all_df = zt_all_df.style.apply(highlight_buy_true, axis=1)
-
-
-            success_zt_buy_pct = round(len(success_df) / len(zt_all_df),2)*100
-            st.markdown(f'''
-                #### 买入数量:{len(buy_stocks_df)}\n
-                * 封板成功率:{success_pct}%\n
-                * 封涨停股买入比例:{success_zt_buy_pct}%\n
-                ''')
-            st.dataframe(buy_stocks_df,hide_index=True)
+            styled_df = zt_all_df.style.apply(highlight_buy_true, axis=1)
             st.markdown('当日全市场封涨停股:')
-            st.dataframe(hl_zt_all_df,hide_index=True)
+            st.dataframe(styled_df,hide_index=True)
 
 
-    if st.button('当日买入图形'):
-        df = get_buy_datas(buy_date_select)
+    if st.button('当日涨停图形'):
+        df = ak.stock_zt_pool_em(date=str(buy_date_select).replace('-',''))
 
         # 按每列格数计算需要多少行
         columns_per_row = 3
@@ -166,14 +188,14 @@ with data_tab:
                 index = i * columns_per_row + j
                 # 如果索引有效，则在当前列中显示数据
                 if index < len(df):
-                    code = df.loc[index,'code']
-                    name = df.loc[index,'name']
+                    code = df.loc[index,'代码']
+                    name = df.loc[index,'名称']
                     price_data = PriceData(code)
                     cols[j].write(name)
                     price_data.plotDayK(buy_date_select,cols[j])
 
 
-    if st.button('买入次日表现'):
+    if st.button('涨停次日表现'):
         @st.cache_data(ttl='5m')
         def caculate_hour_pct(code,buy_date,hour_index):
             price_data = PriceData(code)
@@ -189,12 +211,12 @@ with data_tab:
             return f'background-color: {color}'
 
         with st.spinner(''):
-            df = get_buy_datas(buy_date_select)
-            df['buy_time'] = df['buy_time'].astype(str)
+            df = ak.stock_zt_pool_em(date=str(buy_date_select).replace('-',''))
+            #df['buy_time'] = df['buy_time'].astype(str)
             # 计算分时涨幅
             hours = ['0925','1000','1030','1100','1130','1330','1400','1430','1500']
             for i in range(len(hours)):
-                df[hours[i]] = [caculate_hour_pct(row['code'], row['buy_date'], i) for index, row in df.iterrows()]
+                df[hours[i]] = [caculate_hour_pct(row['代码'], buy_date_select, i) for index, row in df.iterrows()]
             hl_df = df.style.applymap(highlight_greater_than_zero, subset=hours)
             st.dataframe(hl_df,hide_index=True)
 
@@ -233,62 +255,24 @@ with yz_tab:
                     price_data = PriceData(code)
                     price_data.plotDayK(date,st)
                 st.divider()
+ 
 
+with topic_tab:
+    def write_topics(code,name):
+        ts = get_stock_topics(code)
+        with st.expander(name):
+            for t in ts:
+                st.markdown(t,unsafe_allow_html=True)
 
-with backtrade_tab:
-    def get_zt_stocks(date):
-        zt_pool = ak.stock_zt_pool_em(date=date)
-        zt_pool = zt_pool[['代码','名称','成交额','总市值','换手率','首次封板时间']]
-        zt_fail_pool = ak.stock_zt_pool_zbgc_em(date=date)
-        zt_fail_pool = zt_fail_pool[['代码','名称','成交额','总市值','换手率','首次封板时间']]
-        zt_all_pool = pd.concat([zt_pool,zt_fail_pool])
-        
-        next_tradeday = get_next_tradeday(datetime.datetime.strptime(date,'%Y%m%d'))
-        print (next_tradeday)
-        if next_tradeday is not None:
-            next_tradeday = next_tradeday.replace('-','')
-        else:
-            return None
-        zt_all_pool['date'] = date
-        zt_all_pool.reset_index(inplace=True)
-        for index, row in zt_all_pool.iterrows():
-            dict_data = get_ak_price_df(row['代码'],next_tradeday,count=3).to_dict('records')
-            for key, value in dict_data[0].items():
-                zt_all_pool.at[index, 't-1 '+key] = value
-            for key, value in dict_data[1].items():
-                zt_all_pool.at[index, 't+0 '+key] = value
-            for key, value in dict_data[2].items():
-                zt_all_pool.at[index, 't+1 '+key] = value
+    date = datetime.datetime.today().strftime('%Y%m%d')
 
-        return zt_all_pool
+    if st.button('今日首板'):
+        zt_all_df = ak.stock_zt_pool_em(date=date)
+        first_zt_df = zt_all_df[zt_all_df['涨停统计'] == '1/1']
+        for i,row in first_zt_df.iterrows():
+            write_topics(row.get('代码'),row.get('名称'))
 
-    # if st.button('每日涨停板统计'):
-    #     start_date = '20231120'
-    #     zt_pool = ak.stock_zt_pool_em(date=start_date)
-
-    #     end_date = datetime.datetime.today().strftime('%Y%m%d')
-    #     date_range = pd.date_range(start=start_date, end=end_date, freq='D').strftime('%Y%m%d')
-
-    #     dfs = []
-    #     for date in date_range:
-    #         try:
-    #             result = get_zt_stocks(date)
-    #             if result is not None:
-    #                 dfs.append(result)
-    #         except Exception as e:
-    #             break
-
-            
-
-    #     all_pool = pd.concat(dfs)
-    #     st.write(all_pool)
-
-    
-
-
-
-
-
-
-
+    if st.button('今日大涨100'):
+        top100_df = ak.stock_board_cons_ths(symbol="883421").head(100)
+        st.write(top100_df)
 

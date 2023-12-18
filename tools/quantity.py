@@ -40,6 +40,7 @@ def plotK(df,k='d',container=st):
     container.pyplot(fig)
 
 
+
 # 函数来计算EMA
 def ema(values, period):
     """ Calculate Exponential Moving Average """
