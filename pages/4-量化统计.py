@@ -63,7 +63,7 @@ class PriceData:
         }
         return price_dict
 
-    def plotDayK(self, buy_date, container):
+    def plotDayK(self, buy_date, container=st):
         next_tradeday = get_next_tradeday(buy_date)
         df = get_ak_price_df(self.code,next_tradeday.replace('-',''))
         try:  
@@ -95,68 +95,66 @@ class PriceData:
             pass
 
     def plotIntervalK(self, buy_date, container=st):
-        df = ak.stock_zh_a_hist_min_em(self.code,period='1').tail(240)
+        df = ak.stock_zh_a_hist_min_em(self.code,period='1').tail(241)
         df.columns = ['date','open','close','high','low','volume_','volume','lastprice']
         df = df[['date','open','close','high','low','volume']]
         df['date'] = pd.to_datetime(df['date'])
         df.set_index('date',inplace=True)
 
-        mc = mpf.make_marketcolors(up='r',down='g',inherit=True)
-        s  = mpf.make_mpf_style(marketcolors=mc,gridaxis='horizontal',gridstyle='dashed')
+        mc = mpf.make_marketcolors(up='r', down='g', inherit=True)
+        s = mpf.make_mpf_style(marketcolors=mc, gridaxis='horizontal', gridstyle='dashed')
         fig, axe = mpf.plot(df, type='line', style=s, volume=True, returnfig=True)
         container.pyplot(fig)
 
 
-
 with st.expander('数据录入'):
     data_input = st.text_area('Input DATA:')
-    # if st.button('save'):
-    #     df = pd.read_csv(StringIO(data_input), delimiter='\t', engine='python').drop_duplicates(subset='证券代码')
-    #     df = df[['证券代码','时间']]
-    #     df.columns = ['o_code','buy_time']
-    #     df['code'] = df['o_code'].apply(lambda x:x.split('.')[0])
-    #     df['name'] = df['o_code'].apply(lambda x:re.search(r'\(([^)]*)\)', x).group(1))
-    #     df['buy_date'] = datetime.datetime.today().strftime('%Y-%m-%d')
-    #     df.drop('o_code', axis=1, inplace=True)
-    #     st.write(df)
-
-    #     s = mysql_storager(df,'QT_DBLOG')
-    #     st.write(s)
-
     if st.button('qmt data'):
         df = pd.read_csv(StringIO(data_input), delimiter='\t', engine='python').drop_duplicates(subset='证券名称')
-        df = df[['证券代码','证券名称','操作','成交日期','成交时间']]
+        df = df[['证券代码','证券名称','操作','成交价格','成交日期','成交时间']]
         
         def plot_df_data(df):
+            df['date'] = pd.to_datetime(df['成交日期'], format='%Y%m%d')
+            df['date'] = df['date'] + pd.to_timedelta('23:59:59')
+
             for i,row in df.iterrows():
                 code = str(row.get('证券代码'))
+                name = row['证券名称']
+                time = row['成交时间']
+                price = row['成交价格']
+                date = row['date']
+
                 if len(code) < 6:
                     code = (6-len(code))*'0'+code
                 price_data = PriceData(code)
-
                 c1,c2,c3 = st.columns([1,1,1])
                 with c1: 
-                    st.write(row['证券名称'])
-                    st.write(row['成交时间'])
+                    st.markdown(f' ##### {name}')
+                    st.write('当日成交:')
+                    ddf = price_data.buy_date_price(date)
+                    trade_pct = round(price/ddf[0]['close'] - 1,2)
+                    st.write(time,price,trade_pct)
+                    st.write('当日最高:')
+                    idf = get_ak_interval_price_df(code,date)
+                    st.write(str(idf['close'].idxmax()),idf['close'].max(),round(idf['close'].max()/ddf[0]['close']-1,2))
+
                 with c2:
-                    price_data.plotDayK(row['date'],st)
+                    price_data.plotDayK(row['date'])
                 with c3:
                     price_data.plotIntervalK(row['date'])
                 st.divider()
 
         st.markdown('### 买入数据')
         buy_df = df[df['操作'] == '买入'].sort_values('成交时间')
-        buy_df['date'] = pd.to_datetime(buy_df['成交日期'], format='%Y%m%d')
         plot_df_data(buy_df)
         
         st.markdown('### 卖出数据')
         sell_df = df[df['操作'] == '卖出'].sort_values('成交时间')
-        sell_df['date'] = pd.to_datetime(sell_df['成交日期'], format='%Y%m%d')
         plot_df_data(sell_df)
         
 
 
-data_tab, yz_tab, topic_tab = st.tabs(['数据分析','游资研究','大涨研究'])
+data_tab, yz_tab, bt_tab = st.tabs(['数据分析','游资研究','回测数据'])
 with data_tab:
     buy_date_select = st.date_input('买入日期')
     if st.button('当日涨停数据'):
@@ -257,22 +255,56 @@ with yz_tab:
                 st.divider()
  
 
-with topic_tab:
-    def write_topics(code,name):
-        ts = get_stock_topics(code)
-        with st.expander(name):
-            for t in ts:
-                st.markdown(t,unsafe_allow_html=True)
+with bt_tab:
+    if st.button('backtrade'):
+        
+        # 起始日期和结束日期
+        start_date = '2023-12-12'
+        end_date_str = '20231218'
+        end_date = pd.to_datetime(end_date_str, format='%Y%m%d')
 
-    date = datetime.datetime.today().strftime('%Y%m%d')
+        # 生成日期范围
+        date_range = pd.date_range(start=start_date, end=end_date)
 
-    if st.button('今日首板'):
-        zt_all_df = ak.stock_zt_pool_em(date=date)
-        first_zt_df = zt_all_df[zt_all_df['涨停统计'] == '1/1']
-        for i,row in first_zt_df.iterrows():
-            write_topics(row.get('代码'),row.get('名称'))
+        low_opens = []
+        for current_date in date_range:
+            try:
+                date_str = current_date.strftime('%Y%m%d')
+                print (date_str)
+                df = ak.stock_zt_pool_em(date=date_str)
+                nd_str = get_next_tradeday(datetime.datetime.strptime(date_str,'%Y%m%d')).replace('-','')
 
-    if st.button('今日大涨100'):
-        top100_df = ak.stock_board_cons_ths(symbol="883421").head(100)
-        st.write(top100_df)
+                for i,row in df.iterrows():
+                    price_df = get_ak_price_df(row.get('代码'),nd_str,2)
+                    next_open_price = price_df['open'].tolist()[1]
+                    day_close_price = price_df['close'].tolist()[0]
+                    next_open_rate = next_open_price/day_close_price -1
+                    #if next_open_rate <= 0:
+                    next_df = get_ak_interval_price_df(row.get('代码'),get_next_tradeday(datetime.datetime.strptime(date_str,'%Y%m%d')))
+                    print (next_df)
+                    day_high_time = next_df['close'].idxmax()
+                    day_high_rate = next_df['close'].max() / day_close_price -1
+                    d = dict(
+                        date = date_str,
+                        code = row['代码'],
+                        name = row['名称'],
+                        zts = row['涨停统计'],
+                        low_rate = next_open_rate,
+                        day_high_time = day_high_time,
+                        day_high_rate = day_high_rate
+                        )
+                    low_opens.append(d)
+                        #print (low_opens)
+            except Exception as e:
+                print(e)
+                pass
+        output_df = pd.DataFrame(low_opens)
+        output_df.to_excel('bt.xlsx')
+        
+
+
+
+
+
+
 

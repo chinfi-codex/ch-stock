@@ -11,6 +11,7 @@ from tools.llm import get_chatgpt_chat
 from tools.SparkApi import get_spark_chat
 from tools.tools import notify_pushplus
 from datas.cninfo import get_stock_list
+from tools.quantity import *
 
 
 st.set_page_config(
@@ -24,12 +25,39 @@ today = datetime.datetime.now()
 review_dict = {}
 review_df = None
 select_date = st.date_input("选择日期",today)
-load_btn = st.button('Load')
-with st.expander("设置项"):
-    reload_btn = st.button('Reload')
-    notify_btn = st.button('Push')
-    emotion_index = st.text_input('情绪指数')
-    jiuyan_picurl = st.text_input('涨停简图')
+
+qt_tab, sort_tab = st.tabs(['量化复盘','今日大涨'])
+with qt_tab:
+    load_btn = st.button('Load')
+    with st.expander("设置项"):
+        reload_btn = st.button('Reload')
+        notify_btn = st.button('Push')
+        emotion_index = st.text_input('情绪指数')
+        jiuyan_picurl = st.text_input('涨停简图')
+
+with sort_tab:
+    date = str(select_date).replace('-','')
+
+    @st.cache_data(ttl='0.5d')
+    def get_top_df():
+        df = ak.stock_board_cons_ths(symbol="883421").head(100)
+        df = df[df['涨跌幅'].astype(float) >= 10]
+        df = df[['代码','名称','涨跌幅']]
+        return df
+
+    def day_high_time(code):
+        df = get_ak_interval_price_df(code,date)
+        day_high_time = df['close'].idxmax()
+        return day_high_time
+
+    if st.button('今日大涨'):
+        zt_all_df = ak.stock_zt_pool_em(date=date)
+
+        df = get_top_df()
+        df['day_high_time'] = df['代码'].apply(day_high_time)
+        mapping = zt_all_df.set_index('名称')['涨停统计'].to_dict()
+        df['zts'] = df['名称'].map(mapping)
+        st.dataframe(df,hide_index=True)
     
 
 def write_review_from_data(review_dict):

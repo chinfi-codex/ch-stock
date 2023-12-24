@@ -17,6 +17,16 @@ def get_ak_price_df(code,end_date,count=60):
     return df
 
 
+@st.cache_data(ttl='0.5d')
+def get_ak_interval_price_df(code,end_date,count=241):
+    df = ak.stock_zh_a_hist_min_em(code,end_date=end_date,period='1').tail(count)
+    df.columns = ['date','open','close','high','low','volume_','volume','lastprice']
+    df = df[['date','open','close','high','low','volume']]
+    df['date'] = pd.to_datetime(df['date'])
+    df.set_index('date',inplace=True)
+    return df
+
+
 def plotK(df,k='d',container=st):
     if k == 'w':
         df = df.resample('W').agg({'open': 'first', 
