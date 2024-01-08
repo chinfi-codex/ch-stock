@@ -11,7 +11,7 @@ from tools.llm import get_chatgpt_chat
 from tools.SparkApi import get_spark_chat
 from tools.tools import notify_pushplus
 from datas.cninfo import get_stock_list
-from tools.quantity import *
+from qmt.kdata import *
 
 
 st.set_page_config(
@@ -41,7 +41,7 @@ with sort_tab:
     @st.cache_data(ttl='0.5d')
     def get_top_df():
         df = ak.stock_board_cons_ths(symbol="883421").head(100)
-        df = df[df['涨跌幅'].astype(float) >= 10]
+        df = df[df['涨跌幅'].astype(float) >= 9.95]
         df = df[['代码','名称','涨跌幅']]
         return df
 
@@ -54,9 +54,10 @@ with sort_tab:
         zt_all_df = ak.stock_zt_pool_em(date=date)
 
         df = get_top_df()
-        df['day_high_time'] = df['代码'].apply(day_high_time)
+        #df['日内高点'] = df['代码'].apply(day_high_time)
         mapping = zt_all_df.set_index('名称')['涨停统计'].to_dict()
-        df['zts'] = df['名称'].map(mapping)
+        df['涨停统计'] = df['名称'].map(mapping)
+        df['涨停统计'] = df['涨停统计'].astype(str).apply(lambda x:x.replace('/','~'))
         st.dataframe(df,hide_index=True)
     
 

@@ -10,7 +10,7 @@ import requests
 import akshare as ak
 import mplfinance as mpf
 from datas.storager import mysql_retriever,mysql_storager
-from tools.quantity import *
+from qmt.kdata import *
 from datas.cninfo import get_stock_list
 from datas.useful import get_stock_topics
 
@@ -78,17 +78,8 @@ class PriceData:
                 next_high_pct = round((df.iloc[-1]['high']/df.iloc[-2]['close'] -1),5)*100
                 plot_df = df.iloc[:-1]
             
-            if fail_zt:
-                mc = mpf.make_marketcolors(up='black', down='darkgray', inherit=True)
-                s = mpf.make_mpf_style(marketcolors=mc, gridaxis='horizontal', gridstyle='dashed')
-            else:
-                mc = mpf.make_marketcolors(up='r',down='g',inherit=True)
-                s  = mpf.make_mpf_style(marketcolors=mc,gridaxis='horizontal',gridstyle='dashed')
-            fig, axe = mpf.plot(plot_df, type='candle', style=s,
-                     volume=True,
-                     returnfig=True)
             if next_high_pct: container.write(f'隔日最高溢价:{next_high_pct}%')
-            container.pyplot(fig)
+            plotK(plot_df, ma_line_on=True,fail_zt=fail_zt, container=container)
         except Exception as e:
             print(e)
             print(df)
@@ -101,10 +92,7 @@ class PriceData:
         df['date'] = pd.to_datetime(df['date'])
         df.set_index('date',inplace=True)
 
-        mc = mpf.make_marketcolors(up='r', down='g', inherit=True)
-        s = mpf.make_mpf_style(marketcolors=mc, gridaxis='horizontal', gridstyle='dashed')
-        fig, axe = mpf.plot(df, type='line', style=s, volume=True, returnfig=True)
-        container.pyplot(fig)
+        plotK(df,container=container)
 
 
 with st.expander('数据录入'):
@@ -301,8 +289,7 @@ with bt_tab:
         output_df = pd.DataFrame(low_opens)
         output_df.to_excel('bt.xlsx')
         
-
-
+        
 
 
 
