@@ -24,7 +24,7 @@ loaded_settings = mysql_retriever(sql).to_dict('records')[0]
 buy_params = eval(loaded_settings['buy_params'])
 #st.write(loaded_settings)
 
-with st.expander('',expanded=True):
+with st.expander('配置参数',expanded=True):
     c1,c2,c3 = st.columns([1,1,2])
     with c1:
         st.markdown('##### 仓位参数')
@@ -113,11 +113,7 @@ with st.expander('',expanded=True):
         st.toast(resp)
 
 
-
-
-
-
-with st.expander('数据录入'):
+with st.expander('数据录入',expanded=True):
     data_input = st.text_area('Input DATA:')
     if data_input:
         df = pd.read_csv(StringIO(data_input), delimiter='\t', engine='python').drop_duplicates(subset='证券名称')
@@ -128,6 +124,12 @@ with st.expander('数据录入'):
     if st.button('买入核对'):
         def highlight_to_buy(s):
             return ['background-color: yellow' if s['符合买入'] else '' for _ in s]
+
+        def fix_code(code):
+            code = str(code)
+            if len(code) < 6:
+                code = (6-len(code))*'0'+code
+            return code
 
         def merge_tech_columns(orginal_df, fix_column):
             new_data_df = pd.DataFrame()
@@ -158,10 +160,12 @@ with st.expander('数据录入'):
         zt_all_df = merge_tech_columns(zt_all_df,'代码')
         
         if 'buy_df' in locals():
-            zt_all_df['是否买入'] = zt_all_df[zt_all_df['代码'] in buy_df['代码'].tolist()]
+            buy_df['证券代码'] = buy_df['证券代码'].apply(fix_code)
             buy_df = merge_tech_columns(buy_df,'证券代码')
+            zt_all_df['是否买入'] = zt_all_df['代码'].isin(buy_df['证券代码'].tolist())
 
         zt_all_df = zt_all_df.style.apply(highlight_to_buy, axis=1)
+        st.dataframe(buy_df,hide_index=True)
         st.dataframe(zt_all_df,hide_index=True)
 
 
