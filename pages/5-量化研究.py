@@ -20,19 +20,6 @@ st.set_page_config(
     layout="wide"
 )
 
-def get_next_tradeday(date):
-    if date == datetime.datetime.today():
-        return date
-    day_of_week = date.weekday()
-
-    if day_of_week >= 0 and day_of_week <= 3:  # 周一到周四
-        next_date = date + datetime.timedelta(days=1)
-    elif day_of_week == 4:  # 周五
-        next_date = date + datetime.timedelta(days=3)  # 加3天以跳过周末
-    else:  # 周六或周日
-        return None
-    return next_date.strftime('%Y-%m-%d')
-
 
 @st.cache_data(ttl='0.5d')
 def get_buy_datas(buy_date=None):
@@ -44,110 +31,12 @@ def get_buy_datas(buy_date=None):
     return df
 
 
-class PriceData:
-    def __init__(self, code):
-        self.code = code
-
-    def buy_date_price(self, buy_date):
-        df = get_ak_price_df(self.code,buy_date.strftime('%Y%m%d'),count=2)
-        return df.to_dict('records')
-
-    def next_tradeday_price(self, buy_date):
-        next_tradeday = get_next_tradeday(buy_date).replace('-','')
-        day_df = get_ak_price_df(self.code,next_tradeday,count=1)
-        hour_df = ak.stock_zh_a_hist_min_em(self.code,start_date=next_tradeday,end_date=next_tradeday,period='30')
-        price_dict = {
-            'code': self.code,
-            'day': day_df.to_dict('records'),
-            'hours': hour_df.to_dict('records') 
-        }
-        return price_dict
-
-    def plotDayK(self, buy_date, container=st):
-        next_tradeday = get_next_tradeday(buy_date)
-        df = get_ak_price_df(self.code,next_tradeday.replace('-',''))
-        try:  
-            # 隔日为买入当日，或隔日小于今天（周末情况）
-            if next_tradeday == buy_date or datetime.datetime.strptime(next_tradeday,'%Y-%m-%d') > datetime.datetime.today():
-                fail_zt = (df.iloc[-1]['close'] < df.iloc[-1]['high'])
-                next_high_pct = None
-                plot_df = df
-            # 正常：隔日大于买入当日
-            else:
-                fail_zt = (df.iloc[-2]['close'] < df.iloc[-2]['high'])
-                next_high_pct = round((df.iloc[-1]['high']/df.iloc[-2]['close'] -1),5)*100
-                plot_df = df.iloc[:-1]
-            
-            if next_high_pct: container.write(f'隔日最高溢价:{next_high_pct}%')
-            plotK(plot_df, ma_line_on=True,fail_zt=fail_zt, container=container)
-        except Exception as e:
-            print(e)
-            print(df)
-            pass
-
-    def plotIntervalK(self, buy_date, container=st):
-        df = ak.stock_zh_a_hist_min_em(self.code,period='1').tail(241)
-        df.columns = ['date','open','close','high','low','volume_','volume','lastprice']
-        df = df[['date','open','close','high','low','volume']]
-        df['date'] = pd.to_datetime(df['date'])
-        df.set_index('date',inplace=True)
-
-        plotK(df,container=container)
-
-
-with st.expander('数据录入'):
-    data_input = st.text_area('Input DATA:')
-    if st.button('qmt data'):
-        df = pd.read_csv(StringIO(data_input), delimiter='\t', engine='python').drop_duplicates(subset='证券名称')
-        df = df[['证券代码','证券名称','操作','成交价格','成交日期','成交时间']]
-        
-        def plot_df_data(df):
-            df['date'] = pd.to_datetime(df['成交日期'], format='%Y%m%d')
-            df['date'] = df['date'] + pd.to_timedelta('23:59:59')
-
-            for i,row in df.iterrows():
-                code = str(row.get('证券代码'))
-                name = row['证券名称']
-                time = row['成交时间']
-                price = row['成交价格']
-                date = row['date']
-
-                if len(code) < 6:
-                    code = (6-len(code))*'0'+code
-                price_data = PriceData(code)
-                c1,c2,c3 = st.columns([1,1,1])
-                with c1: 
-                    st.markdown(f' ##### {name}')
-                    st.write('当日成交:')
-                    ddf = price_data.buy_date_price(date)
-                    trade_pct = round(price/ddf[0]['close'] - 1,2)
-                    st.write(time,price,trade_pct)
-                    st.write('当日最高:')
-                    idf = get_ak_interval_price_df(code,date)
-                    st.write(str(idf['close'].idxmax()),idf['close'].max(),round(idf['close'].max()/ddf[0]['close']-1,2))
-
-                with c2:
-                    price_data.plotDayK(row['date'])
-                with c3:
-                    price_data.plotIntervalK(row['date'])
-                st.divider()
-
-        st.markdown('### 买入数据')
-        buy_df = df[df['操作'] == '买入'].sort_values('成交时间')
-        plot_df_data(buy_df)
-        
-        st.markdown('### 卖出数据')
-        sell_df = df[df['操作'] == '卖出'].sort_values('成交时间')
-        plot_df_data(sell_df)
-        
-
-
 data_tab, yz_tab, bt_tab = st.tabs(['数据分析','游资研究','回测数据'])
 with data_tab:
     buy_date_select = st.date_input('买入日期')
     if st.button('当日涨停数据'):
         def highlight_buy_true(s):
-                return ['background-color: yellow' if s['涨停统计'] == '1/1' else '' for _ in s]
+            return ['background-color: yellow' if s['涨停统计'] == '1/1' else '' for _ in s]
 
         with st.spinner(''):            
             date = str(buy_date_select).replace('-','')
@@ -179,6 +68,18 @@ with data_tab:
                     price_data = PriceData(code)
                     cols[j].write(name)
                     price_data.plotDayK(buy_date_select,cols[j])
+
+                    stock_data = StockTechnical(code)
+                    vol_rate = stock_data.volume()
+                    day5_range = stock_data.day_range(5)
+                    day60_high = stock_data.is_period_newhigh(60)
+                    zts_counts = stock_data.zts_counts()
+                    cols[j].write(f'量能比,{vol_rate}')
+                    cols[j].write(f'前5日涨幅,{day5_range}')
+                    cols[j].write(f'是否60日新高,{day60_high}')
+                    cols[j].write(f'前连板数,{zts_counts}')
+                    is_buy = (0.3<vol_rate<2.5) and (day5_range < 30) and day60_high and (zts_counts <2)
+                    cols[j].write(f'符合买入,{is_buy}')
 
 
     if st.button('涨停次日表现'):
