@@ -35,7 +35,9 @@ def get_ak_price_df(code,end_date=None,count=60):
 
 
 @st.cache_data(ttl='0.5d')
-def get_ak_interval_price_df(code,end_date,count=241):
+def get_ak_interval_price_df(code,end_date=None,count=241):
+    if end_date is None:
+        end_date = datetime.datetime.now().strftime('%Y%m%d')
     df = ak.stock_zh_a_hist_min_em(code,end_date=end_date,period='1').tail(count)
     df.columns = ['date','open','close','high','low','volume_','volume','lastprice']
     df = df[['date','open','close','high','low','volume']]
@@ -120,7 +122,7 @@ class PriceData:
             pass
 
     def plotIntervalK(self, buy_date, container=st):
-        df = get_ak_interval_price_df(self.code,buy_date.replace('-',''))
+        df = get_ak_interval_price_df(self.code)
         plotK(df,plot_type='line',container=container)
 
 
@@ -130,15 +132,16 @@ class StockTechnical:
         self.day_df = get_ak_price_df(self.code,count=120)
 
     @staticmethod
-    def get_upStopPrice(code):
+    def get_upStopPrice(code,date):
         pass
 
-    def volume(self):
+    def volume(self, buy_time=None):
         # 今日/昨日量能
-        df = self.day_df
-        vols = df['volume'].tolist()
-        return vols[-1]/vols[-2]
-        #return self.day_df[['date','volume']].to_dict('records')
+        vols = self.day_df['volume'].tolist()
+        interval_df = get_ak_interval_price_df(self.code)
+        buy_time = buy_time[:-2] + '00'
+        buy_row = interval_df[interval_df.index.astype(str).str.contains(buy_time)]
+        return buy_row['volume'].tolist()[-1]/vols[-2]
 
     def day_range(self,days):
         # 区间涨幅
@@ -149,8 +152,10 @@ class StockTechnical:
         
     def is_period_newhigh(self,period_range,price_type='upstop'):
         # 是否区间新高：涨停/收盘/最高
-        self.day_df = self.day_df.tail(period_range)
-        is_newhigh =  self.day_df['close'].tolist()[-1] >= self.day_df['close'].max()
+        high_price = self.day_df['high'].tolist()[-1]
+        df = self.day_df
+        df = df.drop(df.index[-1]).tail(period_range)
+        is_newhigh = high_price >= df['high'].max()
         return is_newhigh
 
     def zts_counts(self):
@@ -174,8 +179,14 @@ class StockTechnical:
         return zts_counts
 
     def is_direct_zt(self):
-        # 是否一字板
+        # 一字板
         row_today = self.day_df.to_dict('records')[-1]
-        return row_today['open'] == row_today['close'] == row_today['high']
+        row_yesterday = self.day_df.to_dict('records')[-2]
+        return (row_today['open'] == row_today['high']) or (row_yesterday['open'] == row_yesterday['close'] == row_yesterday['high'])
+
+    def is_fail_zt(self):
+        # 是否炸板
+        row_today = self.day_df.to_dict('records')[-1]
+        return row_today['close'] < row_today['high']
 
 

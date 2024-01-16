@@ -123,7 +123,7 @@ with st.expander('数据录入',expanded=True):
 
     if st.button('买入核对'):
         def highlight_to_buy(s):
-            return ['background-color: yellow' if s['符合买入'] else '' for _ in s]
+            return ['background-color: yellow' if s['是否买入'] else '' for _ in s]
 
         def fix_code(code):
             code = str(code)
@@ -131,45 +131,55 @@ with st.expander('数据录入',expanded=True):
                 code = (6-len(code))*'0'+code
             return code
 
-        def merge_tech_columns(orginal_df, fix_column):
+        def merge_tech_columns(orginal_df, fix_column, find_buytime=False):
             new_data_df = pd.DataFrame()
-            codes = orginal_df[fix_column]
-            for code in codes:
+            for i,row in orginal_df.iterrows():
+                code = row[fix_column]
                 stock_data = StockTechnical(code)
-                vol_rate = stock_data.volume()
                 day5_range = stock_data.day_range(5)
                 day60_high = stock_data.is_period_newhigh(60)
                 zts_counts = stock_data.zts_counts()
                 is_direct_zt = stock_data.is_direct_zt()
-                to_buy = (0.3<vol_rate<2.5) and (day5_range < 30) and day60_high and (zts_counts <2) and not is_direct_zt
+                is_fail_zt = stock_data.is_fail_zt()
                 
-                new_data_df = new_data_df._append({
+                new_data = {
                     fix_column: code,
-                    '量能比': vol_rate,
                     '前5日涨幅': day5_range,
                     '是否60日新高': day60_high,
                     '前连板数': zts_counts,
-                    '是否一字板': is_direct_zt,
-                    '符合买入': to_buy,
-                }, ignore_index=True)
+                    '今或昨是否一字': is_direct_zt,
+                    '是否炸板': is_fail_zt,
+                }
+                if find_buytime:
+                    vol_rate = stock_data.volume(row['成交时间'])
+                    new_data['量能比'] = vol_rate
+                    to_buy = (0.3<vol_rate<2.5) and (day5_range < 30) and day60_high and (zts_counts <2) and not is_direct_zt
+                    new_data['符合买入'] = to_buy
+                new_data_df = new_data_df._append(new_data, ignore_index=True)
                 result_df = pd.merge(orginal_df, new_data_df, on=fix_column)
             return result_df
 
         zt_all_df = ak.stock_zt_pool_em(date=datetime.datetime.now().strftime('%Y%m%d'))
         zt_all_df = zt_all_df[['代码','名称','涨跌幅','首次封板时间','涨停统计']]
         zt_all_df = merge_tech_columns(zt_all_df,'代码')
+        zt_all_df = zt_all_df[zt_all_df['是否60日新高'] == True]
         
         if 'buy_df' in locals():
             buy_df['证券代码'] = buy_df['证券代码'].apply(fix_code)
-            buy_df = merge_tech_columns(buy_df,'证券代码')
+            buy_df = merge_tech_columns(buy_df,'证券代码',True)
             zt_all_df['是否买入'] = zt_all_df['代码'].isin(buy_df['证券代码'].tolist())
-
         zt_all_df = zt_all_df.style.apply(highlight_to_buy, axis=1)
-        st.dataframe(buy_df,hide_index=True)
+
+        st.markdown('##### 今日全市场封板且60日新高')
         st.dataframe(zt_all_df,hide_index=True)
 
+        st.markdown('##### 今日买入炸板')
+        buy_failzt_df = buy_df[buy_df['是否炸板'] == True]
+        st.dataframe(buy_failzt_df,hide_index=True)
+        
 
-    if st.button('买入分析'):
+
+    if st.button('买入图形'):
         def plot_df_data(df):
             df['date'] = pd.to_datetime(df['成交日期'], format='%Y%m%d')
             df['date'] = df['date'] + pd.to_timedelta('23:59:59')
@@ -201,8 +211,8 @@ with st.expander('数据录入',expanded=True):
                     price_data.plotIntervalK(row['date'])
                 st.divider()
 
-        st.markdown('### 买入数据')
+        st.markdown('##### 买入数据')
         plot_df_data(buy_df)
         
-        st.markdown('### 卖出数据')
+        st.markdown('##### 卖出数据')
         plot_df_data(sell_df)

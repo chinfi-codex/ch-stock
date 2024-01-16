@@ -72,5 +72,6 @@ if st.button('今日大涨'):
     mapping = zt_all_df.set_index('名称')['涨停统计'].to_dict()
     df['涨停统计'] = df['名称'].map(mapping)
     df['涨停统计'] = df['涨停统计'].astype(str).apply(lambda x:x.replace('/','~'))
+    df = df.sort_values('日内高点')
     st.dataframe(df,hide_index=True)
 
