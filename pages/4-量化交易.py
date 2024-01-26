@@ -166,16 +166,17 @@ with st.expander('数据录入',expanded=True):
         
         if 'buy_df' in locals():
             buy_df['证券代码'] = buy_df['证券代码'].apply(fix_code)
-            buy_df = merge_tech_columns(buy_df,'证券代码',True)
+            buy_df = merge_tech_columns(buy_df,'证券代码')
             zt_all_df['是否买入'] = zt_all_df['代码'].isin(buy_df['证券代码'].tolist())
-        zt_all_df = zt_all_df.style.apply(highlight_to_buy, axis=1)
+            zt_all_df = zt_all_df.style.apply(highlight_to_buy, axis=1)
 
         st.markdown('##### 今日全市场封板且60日新高')
         st.dataframe(zt_all_df,hide_index=True)
 
-        st.markdown('##### 今日买入炸板')
-        buy_failzt_df = buy_df[buy_df['是否炸板'] == True]
-        st.dataframe(buy_failzt_df,hide_index=True)
+        if 'buy_df' in locals():
+            st.markdown('##### 今日买入炸板')
+            buy_failzt_df = buy_df[buy_df['是否炸板'] == True]
+            st.dataframe(buy_failzt_df,hide_index=True)
         
 
 

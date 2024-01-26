@@ -189,8 +189,26 @@ with bt_tab:
                 pass
         output_df = pd.DataFrame(low_opens)
         output_df.to_excel('bt.xlsx')
+         
         
-        
+    if st.button('test'):
+        df = ak.stock_board_cons_ths(symbol="883421")
+        counts = 0
+        for i,row in df.iterrows():
+            try:
+                code = row.get('代码')
+                name = row.get('名称')
+                day_df = get_ak_price_df(code,count=500)
+                day_df['pct'] = day_df['close'].pct_change()*100
+
+                zt_uprange = day_df['pct'] > 9.9
+                if any(zt_uprange & zt_uprange.shift(1)):
+                    counts += 1
+            except Exception as e:
+                print (e)
+                pass
+        st.write(counts)
+
 
 
 

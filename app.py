@@ -119,7 +119,7 @@ with follow_tab:
                     st.write(row['date'])
                     st.write(row['content'])
 
-        keywords = ["华为","特斯拉","英伟达","苹果","马斯克"]
+        keywords = ["华为","特斯拉","英伟达","苹果","马斯克",'中信证券']
         startdate = datetime.date.today() - datetime.timedelta(days=2)
         startdate_str = startdate.strftime("%Y-%m-%d")
         write_tags_content(startdate_str, keywords)

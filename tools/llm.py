@@ -22,13 +22,36 @@ def get_key(is_paykey=False):
         return random.choice(keys)
 
 
-def get_pricing(model):
-    pricing = {
-        "Model": ["GPT-4", "GPT-4", "GPT-3.5 Turbo", "GPT-3.5 Turbo"],
-        "Context": ["8K", "32K", "4K", "16K"],
-        "Input": ["0.03", "0.06", "0.0015", "0.003"],
-        "Output": ["0.06", "0.12", "0.002", "0.004"],
+def get_baichuan_chat(query):
+    url = "https://api.baichuan-ai.com/v1/chat/completions"
+    api_key = 'sk-9fa2e18c65e311c1a560fee74a000d60'
+
+    data = {
+        "model": "Baichuan2-Turbo",
+        "messages": [
+            {
+                "role": "user",
+                "content": query
+            }
+        ],
+        "stream": False
     }
+    json_data = json.dumps(data)
+    headers = {
+        "Content-Type": "application/json",
+        "Authorization": "Bearer " + api_key
+    }
+    response = requests.post(url, data=json_data, headers=headers, timeout=60)
+
+    if response.status_code == 200:
+        resp = json.loads(response.text)
+        content = resp['choices'][0]['message']['content']
+        print(resp['usage'])
+        return content
+    else:
+        print("请求失败，状态码:", response.status_code)
+        print("请求失败，body:", response.text)
+        print("请求失败，X-BC-Request-Id:", response.headers.get("X-BC-Request-Id"))
 
 
 @st.cache_data(ttl="1day",show_spinner="Thinking...")

@@ -7,7 +7,7 @@ import time
 import akshare as ak
 from datas.storager import mysql_retriever,mysql_storager
 from datas import spider
-from tools.llm import get_chatgpt_chat
+from tools.llm import get_chatgpt_chat, get_baichuan_chat
 from tools.SparkApi import get_spark_chat
 from tools.tools import notify_pushplus
 from datas.cninfo import get_stock_list
@@ -91,21 +91,23 @@ def collect_review_data(select_date):
         """
     news_df = mysql_retriever(sql)
     close_comments = news_df[news_df['content'].str.contains("收评")].to_json()
-    trade_sum_str = get_chatgpt_chat("""
+    trade_sum_str = get_baichuan_chat("""
         任务:提取数据
         提取要求：提取：两市成交总量、北向资金全天交易金额
         输出格式要求: markdown
         * 今日成交总量:
-        * 北向交易金额:xx（净买入/净流出/净卖出）
-        """,
-        close_comments,model="gpt-4-0613")
+        * 北向交易金额:xx（净买入/净流出/净卖出
+        \n
+        """ +
+        close_comments)
     hk_comments = news_df[news_df['content'].str.contains("南向资金今日")].to_json()
-    hk_sum_str = get_chatgpt_chat("""
+    hk_sum_str = get_baichuan_chat("""
         提取全天南向资金净买入或净卖出金额.
         输出格式要求: markdown
         * 南向交易金额: xx（净买入/净流出/净卖出）
-        """,
-        hk_comments,model="gpt-4-0613")
+        \n
+        """+
+        hk_comments)
     trade_sum_str += f"\n{hk_sum_str}"
     review_dict['trade_sum_str'] = trade_sum_str
 
