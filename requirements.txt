@@ -14,6 +14,5 @@ wordcloud==1.9.2
 mysql-connector-python
 mplfinance
 akshare
-pywencai
-scikit-learn
+tushare
 websocket-client
