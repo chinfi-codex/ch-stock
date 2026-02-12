@@ -133,6 +133,42 @@ def get_financing_net_buy_series(days: int = 60) -> pd.DataFrame:
     return grouped[["date", "融资净买入"]]
 
 
+@st.cache_data(ttl='12h')
+def get_gem_pe_series(days: int = 500) -> pd.DataFrame:
+    """
+    获取创业板市盈率（SZ_GEM）近 N 个交易日数据
+    """
+    token = st.secrets.get("tushare_token") or os.environ.get("TUSHARE_TOKEN")
+    if not token:
+        return pd.DataFrame()
+
+    pro = ts.pro_api(token)
+    end = pd.Timestamp.now()
+    start = end - pd.Timedelta(days=days * 4)
+    try:
+        df = pro.daily_info(
+            ts_code="SZ_GEM",
+            start_date=start.strftime("%Y%m%d"),
+            end_date=end.strftime("%Y%m%d"),
+        )
+    except Exception:
+        return pd.DataFrame()
+
+    if df is None or df.empty or "trade_date" not in df.columns or "pe" not in df.columns:
+        return pd.DataFrame()
+
+    df = df.copy()
+    df["trade_date"] = pd.to_datetime(df["trade_date"], errors="coerce")
+    df["pe"] = pd.to_numeric(df["pe"], errors="coerce")
+    df = df.dropna(subset=["trade_date", "pe"])
+    if df.empty:
+        return pd.DataFrame()
+
+    df = df.sort_values("trade_date").tail(days)
+    df = df.rename(columns={"trade_date": "date", "pe": "市盈率"})
+    return df[["date", "市盈率"]]
+
+
 @st.cache_data(ttl='1d')
 def get_market_data():
     """获取大盘数据：上证K，上涨家数、下跌家数、情绪指数"""

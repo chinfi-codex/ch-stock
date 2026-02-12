@@ -16,6 +16,7 @@ from tools import (
     get_llm_response,
     get_longhu_data,
     get_financing_net_buy_series,
+    get_gem_pe_series,
 )
 from tools.financial_data import EconomicIndicators
 from tools.storage_utils import save_review_data, load_review_data
@@ -153,7 +154,28 @@ def _split_summary_parts(summary, expected=3):
     return lines + [""] * (expected - len(lines))
 
 
-def _render_three_blocks(title, labels, contents):
+def _render_three_blocks(title, labels, contents, tone="neutral"):
+    tone_styles = {
+        "neutral": {
+            "background": "#f7f8fb",
+            "border": "#e6e9f2",
+            "label": "#243b53",
+            "content": "#4a5568",
+        },
+        "profit": {
+            "background": "#fff1f1",
+            "border": "#f3c3c3",
+            "label": "#8e2d2d",
+            "content": "#6f2323",
+        },
+        "loss": {
+            "background": "#eef9f1",
+            "border": "#bfe8ca",
+            "label": "#1f6b3a",
+            "content": "#235238",
+        },
+    }
+    style = tone_styles.get(tone, tone_styles["neutral"])
     st.markdown(f"#### {title}")
     cols = st.columns(3)
     for idx, col in enumerate(cols):
@@ -167,15 +189,15 @@ def _render_three_blocks(title, labels, contents):
             st.markdown(
                 f"""
                 <div style="
-                    background:#f7f8fb;
-                    border:1px solid #e6e9f2;
+                    background:{style['background']};
+                    border:1px solid {style['border']};
                     border-radius:10px;
                     padding:12px 14px;
                     margin:6px 0 12px 0;
                     min-height:90px;
                 ">
-                    <div style="font-weight:700;color:#243b53;margin-bottom:6px;">{safe_label}</div>
-                    <div style="color:#4a5568;font-size:0.92rem;line-height:1.5;">{safe_content}</div>
+                    <div style="font-weight:700;color:{style['label']};margin-bottom:6px;">{safe_label}</div>
+                    <div style="color:{style['content']};font-size:0.92rem;line-height:1.5;">{safe_content}</div>
                 </div>
                 """,
                 unsafe_allow_html=True
@@ -309,7 +331,7 @@ def _series_from_df(df, value_col, days):
     return view.to_dict(orient="records")
 
 
-def build_external_section(days=30):
+def build_external_section(days=120):
     btc_metric = None
     us10y_metric = None
     xau_metric = None
@@ -371,15 +393,17 @@ def build_external_section(days=30):
 LLM_TEMPLATES = {
     "external_risk": {
         "system": (
-            "You are a market risk assessment assistant. Use the provided external indicators to assess near-term risk. "
-            "Be objective and avoid predictions. Reply in Chinese."
+            "你是外盘与风险资产复盘分析师，擅长基于时间序列做趋势判断。"
+            "回答需客观、可解释、避免过度预测。"
         ),
         "prompt": (
-            "Below are the external indicators with latest values and last 30-day series (JSON):\n"
+            "以下是外围指标数据（JSON）：\n"
             "{payload}\n\n"
-            "Output:\n"
-            "1) First line: \u98ce\u9669\u7b49\u7ea7\uff1a\u4f4e / \u4e2d / \u9ad8 (choose one)\n"
-            "2) Next lines: 1-2 sentences explanation, <=80 Chinese characters, Markdown format."
+            "关注比特币和金价的中期（120天）、短期（两天内）走势趋势，并分别进行分析。\n"
+            "输出格式：\n"
+            "比特币：中期...；短期...\n"
+            "金价：中期...；短期...\n"
+            "要求：中文，简洁专业，不超过120字，不要输出额外说明。"
         ),
     },
     "market_overview": {
@@ -416,8 +440,13 @@ LLM_TEMPLATES = {
         "prompt": (
             "以下是全市场涨幅Top100股票数据摘要（JSON）：\n"
             "{payload}\n\n"
-            "请总结赚钱效应：包括强势风格/方向、涨幅集中度、情绪温度与持续性线索。"
-            "输出中文，简洁专业，分段，不超过150字，使用markdown格式。"
+            "请结构化总结赚钱效应，严格输出3行，按顺序对应："
+            "1) 强势风格/方向 2) 涨幅集中度 3) 情绪温度与持续性。\n"
+            "格式要求：\n"
+            "1. <一句话>\n"
+            "2. <一句话>\n"
+            "3. <一句话>\n"
+            "每行不超过100字；不要输出标题、前后说明、代码块。"
         ),
     },
     "loss_effect": {
@@ -428,8 +457,13 @@ LLM_TEMPLATES = {
         "prompt": (
             "以下是全市场跌幅Top100股票数据摘要（JSON）：\n"
             "{payload}\n\n"
-            "请总结亏钱效应：包括弱势风格/方向、跌幅集中度、风险偏好与恐慌程度线索。"
-            "输出中文，简洁专业，分段，不超过150字，使用markdown格式。"
+            "请结构化总结亏钱效应，严格输出3行，按顺序对应："
+            "1) 弱势风格/方向 2) 跌幅集中度 3) 风险偏好与恐慌程度。\n"
+            "格式要求：\n"
+            "1. <一句话>\n"
+            "2. <一句话>\n"
+            "3. <一句话>\n"
+            "每行不超过100字；不要输出标题、前后说明、代码块。"
         ),
     },
 }
@@ -653,16 +687,6 @@ def display_review_data(review_data, show_modules=None):
             _render_sparkline(btc.get("series") or [], "#f39c12")
         with cols[1]:
             st.metric(
-                "\u7f8e\u56fd10Y\u56fd\u503a\u6536\u76ca\u7387",
-                _format_value(us10y.get("value"), "{:.2f}%"),
-                _format_delta(us10y.get("change"), "{:+.1f}bp"),
-            )
-            us10y_date = _format_date(us10y.get("date"))
-            if us10y_date:
-                st.caption(f"\u65e5\u671f: {us10y_date}")
-            _render_sparkline(us10y.get("series") or [], "#2f80ed")
-        with cols[2]:
-            st.metric(
                 "XAU 金价 (USD/oz)",
                 _format_value(xau.get("value"), "{:,.2f}"),
                 _format_delta(xau.get("change"), "{:+.2f}%"),
@@ -671,6 +695,16 @@ def display_review_data(review_data, show_modules=None):
             if xau_date:
                 st.caption(f"\u65e5\u671f: {xau_date}")
             _render_sparkline(xau.get("series") or [], "#d4af37")
+        with cols[2]:
+            st.metric(
+                "\u7f8e\u56fd10Y\u56fd\u503a\u6536\u76ca\u7387",
+                _format_value(us10y.get("value"), "{:.2f}%"),
+                _format_delta(us10y.get("change"), "{:+.1f}bp"),
+            )
+            us10y_date = _format_date(us10y.get("date"))
+            if us10y_date:
+                st.caption(f"\u65e5\u671f: {us10y_date}")
+            _render_sparkline(us10y.get("series") or [], "#2f80ed")
 
         risk_payload = {
             "btc_usd": {
@@ -801,6 +835,7 @@ def display_review_data(review_data, show_modules=None):
                         )
 
                     fin_series = get_financing_net_buy_series(60)
+                    gem_pe_series = get_gem_pe_series(500)
 
                     first_row = st.columns(3)
                     with first_row[0]:
@@ -922,7 +957,28 @@ def display_review_data(review_data, show_modules=None):
                             )
                             st.plotly_chart(fig_limit, use_container_width=True)
                     with second_row[2]:
-                        st.empty()
+                        if gem_pe_series is not None and not gem_pe_series.empty:
+                            gem_pe_series = gem_pe_series.sort_values('date')
+                            fig_gem_pe = go.Figure()
+                            fig_gem_pe.add_trace(go.Scatter(
+                                x=gem_pe_series['date'],
+                                y=gem_pe_series['市盈率'],
+                                mode='lines+markers',
+                                name='创业板市盈率',
+                                line=dict(color='#1f77b4', width=2),
+                                marker=dict(size=4),
+                                hovertemplate='%{x|%Y-%m-%d}<br>PE: %{y:.2f}<extra></extra>'
+                            ))
+                            fig_gem_pe.update_layout(
+                                title='创业板市盈率（近500交易日）',
+                                xaxis_title='日期',
+                                yaxis_title='PE',
+                                height=300,
+                                hovermode='x unified'
+                            )
+                            st.plotly_chart(fig_gem_pe, use_container_width=True)
+                        else:
+                            st.info("暂无创业板市盈率数据")
             except Exception as e:
                 st.warning(f"读取历史市场数据失败: {e}")
 
@@ -1031,7 +1087,8 @@ def display_review_data(review_data, show_modules=None):
                 _render_three_blocks(
                     "赚钱效应",
                     ["强势风格/方向", "涨幅集中度", "情绪温度与持续性"],
-                    profit_parts
+                    profit_parts,
+                    tone="profit"
                 )
         else:
             st.info("暂无涨幅Top100数据")
@@ -1044,7 +1101,8 @@ def display_review_data(review_data, show_modules=None):
                 _render_three_blocks(
                     "亏钱效应",
                     ["弱势风格/方向", "跌幅集中度", "风险偏好与恐慌程度"],
-                    loss_parts
+                    loss_parts,
+                    tone="loss"
                 )
         else:
             st.info("暂无跌幅Top100数据")

@@ -21,7 +21,8 @@ from .market_data import (
     get_longhu_data,
     get_dfcf_concept_boards,
     get_concept_board_index,
-    get_financing_net_buy_series
+    get_financing_net_buy_series,
+    get_gem_pe_series,
 )
 
 # 金融数据相关
@@ -71,6 +72,7 @@ __all__ = [
     'get_dfcf_concept_boards',
     'get_concept_board_index',
     'get_financing_net_buy_series',
+    'get_gem_pe_series',
     
     # 金融数据
     'StockRetriever',
