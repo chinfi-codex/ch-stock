@@ -172,7 +172,24 @@ def get_gem_pe_series(days: int = 500) -> pd.DataFrame:
 @st.cache_data(ttl='1d')
 def get_market_data():
     """获取大盘数据：上证K，上涨家数、下跌家数、情绪指数"""
-    def _fetch_index_kline(symbol: str) -> pd.DataFrame:
+    def _fetch_index_kline(symbol: str, ts_code: str) -> pd.DataFrame:
+        token = st.secrets.get("tushare_token") or os.environ.get("TUSHARE_TOKEN")
+        # 优先走 Tushare
+        if token:
+            try:
+                pro = ts.pro_api(token)
+                end = pd.Timestamp.now().strftime("%Y%m%d")
+                start = (pd.Timestamp.now() - pd.Timedelta(days=200)).strftime("%Y%m%d")
+                df = pro.index_daily(ts_code=ts_code, start_date=start, end_date=end)
+                if df is not None and not df.empty:
+                    df = df.rename(columns={"trade_date": "date", "vol": "volume"})
+                    df["date"] = pd.to_datetime(df["date"], errors="coerce")
+                    df = df.dropna(subset=["date"]).sort_values("date").tail(100)
+                    df.set_index("date", inplace=True)
+                    return df
+            except Exception:
+                pass
+        # fallback：AkShare
         try:
             df = ak.stock_zh_index_daily(symbol=symbol).tail(100)
         except Exception:
@@ -184,13 +201,13 @@ def get_market_data():
         return df
 
     # 获取上证指数数据
-    sh_df = _fetch_index_kline("sh000001")
+    sh_df = _fetch_index_kline("sh000001", "000001.SH")
     
     # 获取创业板指数数据
-    cyb_df = _fetch_index_kline("sz399006")
+    cyb_df = _fetch_index_kline("sz399006", "399006.SZ")
 
     # 获取科创板指数数据
-    kcb_df = _fetch_index_kline("sh000688")
+    kcb_df = _fetch_index_kline("sh000688", "000688.SH")
 
     market_data = ak.stock_market_activity_legu()
 
@@ -217,11 +234,20 @@ def get_market_data():
         item = str(market_data.iloc[idx]['item'])
         value = market_data.iloc[idx]['value']
         row[item] = value
-    total_amount = (
-        _get_index_amount(sh_df, stat_date)
-        + _get_index_amount(cyb_df, stat_date)
-        + _get_index_amount(kcb_df, stat_date)
-    )
+
+    # 使用 Tushare 全市场成交额作为量能口径（单位：千元）
+    total_amount = 0.0
+    try:
+        token = st.secrets.get("tushare_token") or os.environ.get("TUSHARE_TOKEN")
+        if token:
+            pro = ts.pro_api(token)
+            trade_date = pd.to_datetime(stat_date).strftime("%Y%m%d")
+            daily = pro.daily(trade_date=trade_date, fields="ts_code,trade_date,amount")
+            if daily is not None and not daily.empty and "amount" in daily.columns:
+                total_amount = pd.to_numeric(daily["amount"], errors="coerce").sum()
+    except Exception:
+        total_amount = 0.0
+
     row['成交额'] = total_amount
 
     try:

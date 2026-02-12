@@ -1,8 +1,10 @@
 import datetime
 import re
+import os
 import pandas as pd
 import akshare as ak
 import streamlit as st
+import tushare as ts
 from tools.stock_data import get_ak_price_df
 
 
@@ -284,16 +286,60 @@ def get_benchmark_kline(start_date, end_date, symbol="sh000001"):
 
 @st.cache_data(ttl="1h")
 def get_zt_pool(date):
+    # 优先 AkShare
     try:
-        return ak.stock_zt_pool_em(date=date)
+        df = ak.stock_zt_pool_em(date=date)
+        if df is not None and not df.empty:
+            return df
+    except Exception:
+        df = None
+    # fallback: Tushare limit_list
+    try:
+        token = st.secrets.get("tushare_token") or os.environ.get("TUSHARE_TOKEN")
+        if not token:
+            return pd.DataFrame()
+        pro = ts.pro_api(token)
+        df = pro.limit_list(trade_date=date, limit_type="U")
+        if df is not None and not df.empty:
+            return df
+        # 二级 fallback：用日线 + 涨跌停价推导
+        daily = pro.daily(trade_date=date, fields="ts_code,trade_date,close,pct_chg,amount")
+        limit = pro.stk_limit(trade_date=date, fields="ts_code,trade_date,up_limit,down_limit")
+        if daily is None or daily.empty or limit is None or limit.empty:
+            return pd.DataFrame()
+        merged = daily.merge(limit, on=["ts_code", "trade_date"], how="left")
+        merged = merged[merged["close"] >= merged["up_limit"]]
+        return merged
     except Exception:
         return pd.DataFrame()
 
 
 @st.cache_data(ttl="1h")
 def get_dt_pool(date):
+    # 优先 AkShare
     try:
-        return ak.stock_zt_pool_dtgc_em(date=date)
+        df = ak.stock_zt_pool_dtgc_em(date=date)
+        if df is not None and not df.empty:
+            return df
+    except Exception:
+        df = None
+    # fallback: Tushare limit_list (跌停)
+    try:
+        token = st.secrets.get("tushare_token") or os.environ.get("TUSHARE_TOKEN")
+        if not token:
+            return pd.DataFrame()
+        pro = ts.pro_api(token)
+        df = pro.limit_list(trade_date=date, limit_type="D")
+        if df is not None and not df.empty:
+            return df
+        # 二级 fallback：用日线 + 涨跌停价推导
+        daily = pro.daily(trade_date=date, fields="ts_code,trade_date,close,pct_chg,amount")
+        limit = pro.stk_limit(trade_date=date, fields="ts_code,trade_date,up_limit,down_limit")
+        if daily is None or daily.empty or limit is None or limit.empty:
+            return pd.DataFrame()
+        merged = daily.merge(limit, on=["ts_code", "trade_date"], how="left")
+        merged = merged[merged["close"] <= merged["down_limit"]]
+        return merged
     except Exception:
         return pd.DataFrame()
 
