@@ -1,0 +1,10 @@
+.venv/
+.venv36/
+__pycache__/
+*.pyc
+tools/__pycache__/
+*.log
+.env
+
+# local-only data snapshots
+datas/reviews/*.json

@@ -10,6 +10,7 @@ import os
 from datetime import datetime, date
 import tushare as ts
 from .utils import get_stock_list
+from .storage_utils import upsert_market_history, load_market_history_df
 
 
 def _get_index_amount(index_df, stat_date: str) -> float:
@@ -211,26 +212,19 @@ def get_market_data():
 
     market_data = ak.stock_market_activity_legu()
 
-    # 确保datas文件夹存在
-    datas_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'datas')
-    os.makedirs(datas_dir, exist_ok=True)
-    csv_file = os.path.join(datas_dir, 'market_data.csv')
-
-    # 提取market_data中的相关数据
+    # 提取 market_data 中的相关数据并持久化到 MySQL
     stat_date = None
     if '统计日期' in market_data['item'].values:
         stat_date = market_data.loc[market_data['item'] == '统计日期', 'value'].values[0]
-        # 统一转换为 YYYY/MM/DD 格式
         try:
             stat_date = pd.to_datetime(stat_date).strftime('%Y/%m/%d')
-        except:
+        except Exception:
             stat_date = pd.Timestamp.now().strftime('%Y/%m/%d')
     else:
         stat_date = pd.Timestamp.now().strftime('%Y/%m/%d')
 
-    # 构造一行字典：表头为日期和所有item名，值为对应value
     row = {'日期': stat_date}
-    for idx in range(0, 11):
+    for idx in range(0, min(11, len(market_data))):
         item = str(market_data.iloc[idx]['item'])
         value = market_data.iloc[idx]['value']
         row[item] = value
@@ -251,47 +245,38 @@ def get_market_data():
     row['成交额'] = total_amount
 
     try:
-        # 统一表头定义：日期 + 11 个指标
-        columns = ['日期'] + [str(market_data.iloc[i]['item']) for i in range(0, 11)]
-        if '成交额' not in columns:
-            columns.append('成交额')
-
-        # 检查CSV是否存在
-        if os.path.exists(csv_file):
-            df = pd.read_csv(csv_file)
-
-            # 兼容历史文件：如果没有“日期”列，则根据当前 schema 修正表头
-            if '日期' not in df.columns:
-                if len(df.columns) == len(columns):
-                    df.columns = columns
-                else:
-                    # 至少确保第一列为日期，避免 KeyError
-                    first_cols = list(df.columns)
-                    first_cols[0] = '日期'
-                    df.columns = first_cols
-            if '成交额' not in df.columns:
-                df['成交额'] = ""
-
-            # 检查是否已存在该日期，避免重复写入
-            if not df[df['日期'] == stat_date].empty:
-                idx = df.index[df['日期'] == stat_date][0]
-                if (
-                    '成交额' in df.columns
-                    and (pd.isna(df.at[idx, '成交额']) or str(df.at[idx, '成交额']).strip() == "")
-                ):
-                    df.at[idx, '成交额'] = row.get('成交额', "")
-                df.to_csv(csv_file, index=False)
-            else:
-                # 新数据插入首行，保持最近日期在上
-                df = pd.concat([pd.DataFrame([row], columns=columns), df], ignore_index=True)
-                df.to_csv(csv_file, index=False)
-        else:
-            # 新建数据，表头：日期及item
-            df = pd.DataFrame([row], columns=columns)
-            df.to_csv(csv_file, index=False)
+        upsert_market_history(stat_date=row['日期'], row_payload=row)
     except Exception as e:
-        print("写入market_data.csv失败:", e)
+        print("写入 market_history 失败:", e)
+
     return sh_df, cyb_df, kcb_df, market_data
+
+
+@st.cache_data(ttl='30m')
+def get_market_history(days: int = 30) -> pd.DataFrame:
+    """从 MySQL 读取市场历史数据（替代 market_data.csv）。"""
+    try:
+        df = load_market_history_df(limit=max(int(days), 30) * 5)
+    except Exception:
+        return pd.DataFrame()
+
+    if df is None or df.empty:
+        return pd.DataFrame()
+
+    if '日期' in df.columns:
+        df['日期'] = pd.to_datetime(df['日期'], errors='coerce')
+        df = df.dropna(subset=['日期']).sort_values('日期').tail(days)
+
+    numeric_cols = ['活跃度', '上涨', '下跌', '涨停', '跌停', '成交额']
+    for col in numeric_cols:
+        if col in df.columns:
+            try:
+                df[col] = df[col].astype(str).str.replace('%', '').str.replace(',', '')
+                df[col] = pd.to_numeric(df[col], errors='coerce')
+            except Exception:
+                df[col] = pd.to_numeric(df[col], errors='coerce')
+
+    return df
 
 
 @st.cache_data(ttl='1d')

@@ -23,6 +23,7 @@ from .market_data import (
     get_concept_board_index,
     get_financing_net_buy_series,
     get_gem_pe_series,
+    get_market_history,
 )
 
 # 金融数据相关
@@ -73,6 +74,7 @@ __all__ = [
     'get_concept_board_index',
     'get_financing_net_buy_series',
     'get_gem_pe_series',
+    'get_market_history',
     
     # 金融数据
     'StockRetriever',

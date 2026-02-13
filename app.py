@@ -17,6 +17,7 @@ from tools import (
     get_longhu_data,
     get_financing_net_buy_series,
     get_gem_pe_series,
+    get_market_history,
 )
 from tools.financial_data import EconomicIndicators
 from tools.storage_utils import save_review_data, load_review_data
@@ -731,6 +732,7 @@ def display_review_data(review_data, show_modules=None):
             payload_str = json.dumps(risk_payload, ensure_ascii=False)
             risk_summary = llm_summarize("external_risk", payload_str)
             if risk_summary:
+                risk_summary_html = risk_summary.replace("\n", "<br>")
                 st.markdown(
                     f"""
                     <div style="
@@ -743,7 +745,7 @@ def display_review_data(review_data, show_modules=None):
                         font-size:0.95rem;
                         line-height:1.6;
                     ">
-                        {risk_summary.replace("\n", "<br>")}
+                        {risk_summary_html}
                     </div>
                     """,
                     unsafe_allow_html=True
@@ -779,208 +781,191 @@ def display_review_data(review_data, show_modules=None):
             if not kcb_df.empty:
                 plotK(kcb_df)
 
-        import os
-        csv_file = os.path.join('datas', 'market_data.csv')
-        if os.path.exists(csv_file):
-            try:
-                df_history = pd.read_csv(csv_file)
-                df_history = df_history.loc[:, ~df_history.columns.str.contains('^Unnamed')]
-                if '日期' in df_history.columns:
-                    df_history['日期'] = pd.to_datetime(df_history['日期'], errors='coerce')
-                    df_history = df_history.dropna(subset=['日期'])
-                    df_history = df_history.sort_values('日期')
-                    df_history = df_history.tail(30)
-                    numeric_cols = ['上涨', '下跌', '涨停', '跌停', '活跃度', '成交额']
-                    for col in numeric_cols:
-                        if col in df_history.columns:
-                            if col == '活跃度':
-                                df_history[col] = df_history[col].astype(str).str.replace('%', '').astype(float)
-                            else:
-                                df_history[col] = pd.to_numeric(df_history[col], errors='coerce')
+        try:
+            df_history = get_market_history(30)
+            if not df_history.empty:
+                latest_row = df_history.iloc[-1]
+                up_stocks = latest_row.get('上涨', up_stocks)
+                down_stocks = latest_row.get('下跌', down_stocks)
+                limit_up = latest_row.get('涨停', limit_up)
+                limit_down = latest_row.get('跌停', limit_down)
+                activity = latest_row.get('活跃度', activity)
 
-                    latest_row = df_history.iloc[-1] if not df_history.empty else None
-                    if latest_row is not None:
-                        up_stocks = latest_row.get('上涨', up_stocks)
-                        down_stocks = latest_row.get('下跌', down_stocks)
-                        limit_up = latest_row.get('涨停', limit_up)
-                        limit_down = latest_row.get('跌停', limit_down)
-                        activity = latest_row.get('活跃度', activity)
+                summary_payload = {
+                    'indices': {
+                        '上证指数': _build_index_snapshot(sh_df),
+                        '创业板指数': _build_index_snapshot(cyb_df),
+                        '科创板指数': _build_index_snapshot(kcb_df)
+                    },
+                }
+                payload_str = json.dumps(summary_payload, ensure_ascii=False)
+                llm_summary = llm_summarize('market_overview', payload_str)
+                if llm_summary:
+                    llm_summary_html = llm_summary.replace("\n", "<br>")
+                    st.markdown(
+                        f"""
+                        <div style="
+                            background: #f2f6ff;
+                            border-left: 4px solid #4c6ef5;
+                            border-radius: 8px;
+                            padding: 12px 16px;
+                            margin: 8px 0 16px 0;
+                            color: #1a2b49;
+                            font-size: 0.95rem;
+                            line-height: 1.6;
+                        ">
+                            {llm_summary_html}
+                        </div>
+                        """,
+                        unsafe_allow_html=True
+                    )
 
-                    summary_payload = {
-                        'indices': {
-                            '上证指数': _build_index_snapshot(sh_df),
-                            '创业板指数': _build_index_snapshot(cyb_df),
-                            '科创板指数': _build_index_snapshot(kcb_df)
-                        },
-                    }
-                    payload_str = json.dumps(summary_payload, ensure_ascii=False)
-                    llm_summary = llm_summarize('market_overview', payload_str)
-                    if llm_summary:
-                        st.markdown(
-                            f"""
-                            <div style="
-                                background: #f2f6ff;
-                                border-left: 4px solid #4c6ef5;
-                                border-radius: 8px;
-                                padding: 12px 16px;
-                                margin: 8px 0 16px 0;
-                                color: #1a2b49;
-                                font-size: 0.95rem;
-                                line-height: 1.6;
-                            ">
-                                {llm_summary.replace('\n', '<br>')}
-                            </div>
-                            """,
-                            unsafe_allow_html=True
+                fin_series = get_financing_net_buy_series(60)
+                gem_pe_series = get_gem_pe_series(500)
+
+                first_row = st.columns(3)
+                with first_row[0]:
+                    if '成交额' in df_history.columns:
+                        fig_amount = go.Figure()
+                        fig_amount.add_trace(go.Scatter(
+                            x=df_history['日期'],
+                            y=df_history['成交额'],
+                            mode='lines+markers',
+                            name='成交额',
+                            line=dict(color='#4c6ef5', width=2),
+                            marker=dict(size=4)
+                        ))
+                        fig_amount.update_layout(
+                            title='成交额',
+                            xaxis_title='日期',
+                            yaxis_title='成交额',
+                            height=300,
+                            hovermode='x unified'
                         )
+                        st.plotly_chart(fig_amount, use_container_width=True)
 
-                    fin_series = get_financing_net_buy_series(60)
-                    gem_pe_series = get_gem_pe_series(500)
+                with first_row[1]:
+                    if '活跃度' in df_history.columns:
+                        fig_activity = go.Figure()
+                        fig_activity.add_trace(go.Scatter(
+                            x=df_history['日期'],
+                            y=df_history['活跃度'],
+                            mode='lines+markers',
+                            name='情绪指数',
+                            line=dict(color='#f39c12', width=2),
+                            marker=dict(size=4)
+                        ))
+                        fig_activity.update_layout(
+                            title='情绪指数',
+                            xaxis_title='日期',
+                            yaxis_title='活跃度',
+                            height=300,
+                            hovermode='x unified'
+                        )
+                        st.plotly_chart(fig_activity, use_container_width=True)
 
-                    first_row = st.columns(3)
-                    with first_row[0]:
-                        if '成交额' in df_history.columns:
-                            fig_amount = go.Figure()
-                            fig_amount.add_trace(go.Scatter(
-                                x=df_history['日期'],
-                                y=df_history['成交额'],
-                                mode='lines+markers',
-                                name='成交额',
-                                line=dict(color='#4c6ef5', width=2),
-                                marker=dict(size=4)
-                            ))
-                            fig_amount.update_layout(
-                                title='成交额',
-                                xaxis_title='日期',
-                                yaxis_title='成交额',
-                                height=300,
-                                hovermode='x unified'
-                            )
-                            st.plotly_chart(fig_amount, use_container_width=True)
+                with first_row[2]:
+                    if not fin_series.empty and 'date' in fin_series.columns and '融资净买入' in fin_series.columns:
+                        fig_fin = go.Figure()
+                        fig_fin.add_trace(go.Scatter(
+                            x=fin_series['date'],
+                            y=fin_series['融资净买入'],
+                            mode='lines+markers',
+                            name='融资净买入',
+                            line=dict(color='#16a085', width=2),
+                            marker=dict(size=4),
+                            hovertemplate='%{x|%Y-%m-%d}<br>融资净买入: %{y:,.0f}<extra></extra>'
+                        ))
+                        fig_fin.update_layout(
+                            title='融资净买入（近60交易日）',
+                            xaxis_title='日期',
+                            yaxis_title='融资净买入',
+                            height=300,
+                            hovermode='x unified'
+                        )
+                        st.plotly_chart(fig_fin, use_container_width=True)
+                    else:
+                        st.info("暂无融资净买入数据")
 
-                    with first_row[1]:
-                        if '活跃度' in df_history.columns:
-                            fig_activity = go.Figure()
-                            fig_activity.add_trace(go.Scatter(
-                                x=df_history['日期'],
-                                y=df_history['活跃度'],
-                                mode='lines+markers',
-                                name='情绪指数',
-                                line=dict(color='#f39c12', width=2),
-                                marker=dict(size=4)
-                            ))
-                            fig_activity.update_layout(
-                                title='情绪指数（活跃度）',
-                                xaxis_title='日期',
-                                yaxis_title='活跃度 (%)',
-                                height=300,
-                                hovermode='x unified'
-                            )
-                            st.plotly_chart(fig_activity, use_container_width=True)
+                second_row = st.columns(3)
+                with second_row[0]:
+                    if '上涨' in df_history.columns and '下跌' in df_history.columns:
+                        fig_updown = go.Figure()
+                        fig_updown.add_trace(go.Bar(
+                            x=df_history['日期'],
+                            y=df_history['上涨'],
+                            name='上涨家数',
+                            marker_color='#2ecc71',
+                            opacity=0.75,
+                        ))
+                        fig_updown.add_trace(go.Bar(
+                            x=df_history['日期'],
+                            y=df_history['下跌'],
+                            name='下跌家数',
+                            marker_color='#e74c3c',
+                            opacity=0.75,
+                        ))
+                        fig_updown.update_layout(
+                            title='涨跌家数对比',
+                            xaxis_title='日期',
+                            yaxis_title='家数',
+                            barmode='group',
+                            height=300,
+                            hovermode='x unified'
+                        )
+                        st.plotly_chart(fig_updown, use_container_width=True)
 
-                    with first_row[2]:
-                        if fin_series is not None and not fin_series.empty:
-                            fin_series = fin_series.sort_values('date')
-                            colors = fin_series['融资净买入'].apply(lambda x: '#e74c3c' if x >= 0 else '#2ecc71')
-                            fig_financing = go.Figure(go.Bar(
-                                x=fin_series['date'],
-                                y=fin_series['融资净买入'],
-                                marker_color=colors,
-                                name='融资净买入',
-                                hovertemplate='%{x|%Y-%m-%d}<br>净买入: %{y:.0f}<extra></extra>'
-                            ))
-                            fig_financing.update_layout(
-                                title='融资净买入（近60交易日）',
-                                xaxis_title='日期',
-                                yaxis_title='金额',
-                                height=300,
-                                hovermode='x unified',
-                                bargap=0.2
-                            )
-                            st.plotly_chart(fig_financing, use_container_width=True)
+                with second_row[1]:
+                    if '涨停' in df_history.columns and '跌停' in df_history.columns:
+                        fig_limit = go.Figure()
+                        fig_limit.add_trace(go.Bar(
+                            x=df_history['日期'],
+                            y=df_history['涨停'],
+                            name='涨停数',
+                            marker_color='#e74c3c',
+                            opacity=0.75,
+                        ))
+                        fig_limit.add_trace(go.Bar(
+                            x=df_history['日期'],
+                            y=df_history['跌停'],
+                            name='跌停数',
+                            marker_color='#3498db',
+                            opacity=0.75,
+                        ))
+                        fig_limit.update_layout(
+                            title='涨停/跌停数量',
+                            xaxis_title='日期',
+                            yaxis_title='数量',
+                            barmode='group',
+                            height=300,
+                            hovermode='x unified'
+                        )
+                        st.plotly_chart(fig_limit, use_container_width=True)
 
-                    second_row = st.columns(3)
-                    with second_row[0]:
-                        if '上涨' in df_history.columns and '下跌' in df_history.columns:
-                            fig_up_down = go.Figure()
-                            fig_up_down.add_trace(go.Scatter(
-                                x=df_history['日期'],
-                                y=df_history['上涨'],
-                                mode='lines+markers',
-                                name='上涨数',
-                                line=dict(color='#e74c3c', width=2),
-                                marker=dict(size=4)
-                            ))
-                            fig_up_down.add_trace(go.Scatter(
-                                x=df_history['日期'],
-                                y=df_history['下跌'],
-                                mode='lines+markers',
-                                name='下跌数',
-                                line=dict(color='#2ecc71', width=2),
-                                marker=dict(size=4)
-                            ))
-                            fig_up_down.update_layout(
-                                title='上涨数 vs 下跌数',
-                                xaxis_title='日期',
-                                yaxis_title='数量',
-                                height=300,
-                                hovermode='x unified',
-                                legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
-                            )
-                            st.plotly_chart(fig_up_down, use_container_width=True)
-                    with second_row[1]:
-                        if '涨停' in df_history.columns and '跌停' in df_history.columns:
-                            fig_limit = go.Figure()
-                            fig_limit.add_trace(go.Scatter(
-                                x=df_history['日期'],
-                                y=df_history['涨停'],
-                                mode='lines+markers',
-                                name='涨停数',
-                                line=dict(color='#c0392b', width=2),
-                                marker=dict(size=4)
-                            ))
-                            fig_limit.add_trace(go.Scatter(
-                                x=df_history['日期'],
-                                y=df_history['跌停'],
-                                mode='lines+markers',
-                                name='跌停数',
-                                line=dict(color='#27ae60', width=2),
-                                marker=dict(size=4)
-                            ))
-                            fig_limit.update_layout(
-                                title='涨停数 vs 跌停数',
-                                xaxis_title='日期',
-                                yaxis_title='数量',
-                                height=300,
-                                hovermode='x unified',
-                                legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
-                            )
-                            st.plotly_chart(fig_limit, use_container_width=True)
-                    with second_row[2]:
-                        if gem_pe_series is not None and not gem_pe_series.empty:
-                            gem_pe_series = gem_pe_series.sort_values('date')
-                            fig_gem_pe = go.Figure()
-                            fig_gem_pe.add_trace(go.Scatter(
-                                x=gem_pe_series['date'],
-                                y=gem_pe_series['市盈率'],
-                                mode='lines+markers',
-                                name='创业板市盈率',
-                                line=dict(color='#1f77b4', width=2),
-                                marker=dict(size=4),
-                                hovertemplate='%{x|%Y-%m-%d}<br>PE: %{y:.2f}<extra></extra>'
-                            ))
-                            fig_gem_pe.update_layout(
-                                title='创业板市盈率（近500交易日）',
-                                xaxis_title='日期',
-                                yaxis_title='PE',
-                                height=300,
-                                hovermode='x unified'
-                            )
-                            st.plotly_chart(fig_gem_pe, use_container_width=True)
-                        else:
-                            st.info("暂无创业板市盈率数据")
-            except Exception as e:
-                st.warning(f"读取历史市场数据失败: {e}")
+                with second_row[2]:
+                    if not gem_pe_series.empty and 'date' in gem_pe_series.columns and '市盈率' in gem_pe_series.columns:
+                        fig_gem_pe = go.Figure()
+                        fig_gem_pe.add_trace(go.Scatter(
+                            x=gem_pe_series['date'],
+                            y=gem_pe_series['市盈率'],
+                            mode='lines+markers',
+                            name='创业板市盈率',
+                            line=dict(color='#1f77b4', width=2),
+                            marker=dict(size=4),
+                            hovertemplate='%{x|%Y-%m-%d}<br>PE: %{y:.2f}<extra></extra>'
+                        ))
+                        fig_gem_pe.update_layout(
+                            title='创业板市盈率（近500交易日）',
+                            xaxis_title='日期',
+                            yaxis_title='PE',
+                            height=300,
+                            hovermode='x unified'
+                        )
+                        st.plotly_chart(fig_gem_pe, use_container_width=True)
+                    else:
+                        st.info("暂无创业板市盈率数据")
+        except Exception as e:
+            st.warning(f"读取历史市场数据失败: {e}")
 
         st.markdown("---")
 
@@ -1354,20 +1339,20 @@ show_modules = {
 load_btn = st.button('Load')
 
 if load_btn:
-    if select_date.weekday() >= 5: 
+    if select_date.weekday() >= 5:
         st.warning("非交易日")
         st.stop()
-    
-    # date_str = select_date.strftime('%Y-%m-%d')
-    # cached_data = load_review_data(date_str)
-    # if cached_data:
-    #     st.info(f"使用已缓存复盘数据: {date_str}")
-    #     display_review_data(cached_data)
-    # else:
-    review_data = build_review_data(select_date, show_modules)
-    #     if is_review_data_complete(review_data):
-    #         save_review_data(date_str, review_data)
-    #         st.success(f"复盘数据已保存: {date_str}")
-    #     else:
-    #         st.warning("复盘数据不完整，未写入缓存")
-    display_review_data(review_data, show_modules)
+
+    date_str = select_date.strftime('%Y-%m-%d')
+    cached_data = load_review_data(date_str)
+    if cached_data:
+        st.info(f"优先加载数据库复盘数据: {date_str}")
+        display_review_data(cached_data, show_modules)
+    else:
+        review_data = build_review_data(select_date, show_modules)
+        if is_review_data_complete(review_data):
+            save_review_data(date_str, review_data)
+            st.success(f"当日数据不存在，已抓取并写入数据库: {date_str}")
+        else:
+            st.warning("抓取完成但数据完整性不足，未写入数据库")
+        display_review_data(review_data, show_modules)

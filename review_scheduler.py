@@ -4,9 +4,11 @@ import argparse
 import datetime as dt
 import logging
 import time
+import os
 from pathlib import Path
 
 import pandas as pd
+import tushare as ts
 
 logging.getLogger("streamlit").setLevel(logging.ERROR)
 logging.getLogger("streamlit.runtime").setLevel(logging.ERROR)
@@ -25,6 +27,34 @@ from tools.storage_utils import save_review_data
 
 def _parse_date(date_str):
     return dt.datetime.strptime(date_str, "%Y-%m-%d").date()
+
+
+def _is_trade_day(target_date):
+    """使用 tushare 交易日历判断是否交易日。返回 (is_open, reason)。"""
+    token = os.environ.get("TUSHARE_TOKEN")
+    if not token:
+        try:
+            import streamlit as st
+            token = st.secrets.get("tushare_token")
+        except Exception:
+            token = None
+
+    if not token:
+        # 无 token 时回退到工作日判断
+        return (target_date.weekday() < 5), "fallback-weekday"
+
+    try:
+        pro = ts.pro_api(token)
+        day = target_date.strftime("%Y%m%d")
+        cal = pro.trade_cal(exchange="", start_date=day, end_date=day)
+        if cal is None or cal.empty:
+            return (target_date.weekday() < 5), "calendar-empty-fallback-weekday"
+        row = cal.iloc[0]
+        is_open = int(row.get("is_open", 0)) == 1
+        return is_open, "tushare-trade-cal"
+    except Exception as exc:
+        logging.warning("trade_cal check failed, fallback weekday: %s", exc)
+        return (target_date.weekday() < 5), "trade-cal-exception-fallback-weekday"
 
 
 def _validate_time(time_str):
@@ -299,18 +329,58 @@ def build_full_review_data(target_date):
     return review_data
 
 
+def _is_review_data_complete(review_data):
+    if not review_data:
+        return False, "empty review data"
+
+    indices = review_data.get("indices") or {}
+    if not any((indices.get(k) or []) for k in ("sh_df", "cyb_df", "kcb_df")):
+        return False, "indices missing"
+
+    if not review_data.get("market_overview"):
+        return False, "market_overview missing"
+
+    if not review_data.get("top_100_turnover"):
+        return False, "top_100_turnover missing"
+
+    top_100_range = review_data.get("top_100_range") or {}
+    if not ((top_100_range.get("sh_stocks") or []) or (top_100_range.get("cyb_kcb_stocks") or [])):
+        return False, "top_100_range missing"
+
+    short_data = review_data.get("short") or {}
+    if not short_data.get("trade_date"):
+        return False, "short.trade_date missing"
+
+    return True, "ok"
+
+
 def run_once(target_date, output_dir, skip_weekend=False):
     if skip_weekend and target_date.weekday() >= 5:
         logging.info("Skip weekend date: %s", target_date.strftime("%Y-%m-%d"))
         return None
 
+    is_open, source = _is_trade_day(target_date)
+    if not is_open:
+        logging.info("Skip non-trading day: %s (source=%s)", target_date.strftime("%Y-%m-%d"), source)
+        return None
+
     review_data = build_full_review_data(target_date)
+    ok, reason = _is_review_data_complete(review_data)
+    review_data.setdefault("integrity", {})
+    review_data["integrity"] = {
+        "ok": bool(ok),
+        "reason": reason,
+        "checked_at": dt.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+    }
+    if not ok:
+        logging.warning("Review data integrity check failed: %s", reason)
+
     file_path = save_review_data(
         target_date.strftime("%Y-%m-%d"),
         review_data,
         review_dir=output_dir,
     )
-    logging.info("Saved review JSON: %s", file_path)
+    logging.info("Saved review JSON/DB: %s", file_path)
     return file_path
 
 
