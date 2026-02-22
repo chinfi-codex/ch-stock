@@ -7,10 +7,10 @@ import streamlit as st
 import pandas as pd
 import akshare as ak
 import os
+import json
 from datetime import datetime, date
 import tushare as ts
 from .utils import get_stock_list
-from .storage_utils import upsert_market_history, load_market_history_df
 
 
 def _get_index_amount(index_df, stat_date: str) -> float:
@@ -53,6 +53,102 @@ def _get_prev_trade_date(trade_date: str, pro):
         return open_dates[-1]
     except Exception:
         return None
+
+
+def _to_int(value, default=0):
+    if value is None:
+        return default
+    try:
+        s = str(value).replace("%", "").replace(",", "").strip()
+        num = pd.to_numeric(s, errors="coerce")
+        if pd.isna(num):
+            return default
+        return int(float(num))
+    except Exception:
+        return default
+
+
+def _to_float(value):
+    if value is None:
+        return None
+    try:
+        s = str(value).replace("%", "").replace(",", "").strip()
+        num = pd.to_numeric(s, errors="coerce")
+        if pd.isna(num):
+            return None
+        return float(num)
+    except Exception:
+        return None
+
+
+def _find_market_item_value(market_data: pd.DataFrame, keywords):
+    if market_data is None or market_data.empty:
+        return None
+    if not {"item", "value"}.issubset(set(market_data.columns)):
+        return None
+    for _, r in market_data.iterrows():
+        item = str(r.get("item", ""))
+        if any(k in item for k in keywords):
+            return r.get("value")
+    return None
+
+
+def _sync_market_activity_to_mysql(stat_date, market_data, total_amount):
+    """
+    同步市场数据到 MySQL market_activity_daily。
+    失败时只打印日志，不影响主流程。
+    """
+    try:
+        from database.db_manager import get_db
+    except Exception as e:
+        print(f"MySQL模块加载失败: {e}")
+        return
+
+    trade_date = pd.to_datetime(stat_date, errors="coerce")
+    if pd.isna(trade_date):
+        print(f"MySQL同步跳过，无法解析日期: {stat_date}")
+        return
+    trade_date = trade_date.strftime("%Y-%m-%d")
+
+    up_raw = _find_market_item_value(market_data, ["上涨"])
+    down_raw = _find_market_item_value(market_data, ["下跌"])
+    zt_raw = _find_market_item_value(market_data, ["涨停"])
+    dt_raw = _find_market_item_value(market_data, ["跌停"])
+    activity_raw = _find_market_item_value(market_data, ["活跃", "情绪"])
+
+    payload = {}
+    if market_data is not None and not market_data.empty and {"item", "value"}.issubset(set(market_data.columns)):
+        for _, r in market_data.iterrows():
+            k = str(r.get("item", ""))
+            v = r.get("value")
+            if pd.isna(v):
+                payload[k] = None
+            else:
+                payload[k] = str(v)
+
+    # total_amount 来自 tushare daily.amount 汇总，保持与既有导入脚本一致：/1e8
+    total_amount_yi = None
+    try:
+        total_amount_yi = float(total_amount) / 1e8 if total_amount is not None else None
+    except Exception:
+        total_amount_yi = None
+
+    data = {
+        "trade_date": trade_date,
+        "up_count": _to_int(up_raw, 0),
+        "down_count": _to_int(down_raw, 0),
+        "zt_count": _to_int(zt_raw, 0),
+        "dt_count": _to_int(dt_raw, 0),
+        "activity_index": _to_float(activity_raw),
+        "total_amount": total_amount_yi,
+        "raw_payload": json.dumps(payload, ensure_ascii=False),
+    }
+
+    try:
+        with get_db() as db:
+            db.upsert("market_activity_daily", data, unique_keys=["trade_date"])
+    except Exception as e:
+        print(f"MySQL同步market_activity_daily失败: {e}")
 
 
 def _get_financing_net_buy(trade_date: str):
@@ -212,19 +308,26 @@ def get_market_data():
 
     market_data = ak.stock_market_activity_legu()
 
-    # 提取 market_data 中的相关数据并持久化到 MySQL
+    # 确保datas文件夹存在
+    datas_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'datas')
+    os.makedirs(datas_dir, exist_ok=True)
+    csv_file = os.path.join(datas_dir, 'market_data.csv')
+
+    # 提取market_data中的相关数据
     stat_date = None
     if '统计日期' in market_data['item'].values:
         stat_date = market_data.loc[market_data['item'] == '统计日期', 'value'].values[0]
+        # 统一转换为 YYYY/MM/DD 格式
         try:
             stat_date = pd.to_datetime(stat_date).strftime('%Y/%m/%d')
-        except Exception:
+        except:
             stat_date = pd.Timestamp.now().strftime('%Y/%m/%d')
     else:
         stat_date = pd.Timestamp.now().strftime('%Y/%m/%d')
 
+    # 构造一行字典：表头为日期和所有item名，值为对应value
     row = {'日期': stat_date}
-    for idx in range(0, min(11, len(market_data))):
+    for idx in range(0, 11):
         item = str(market_data.iloc[idx]['item'])
         value = market_data.iloc[idx]['value']
         row[item] = value
@@ -245,38 +348,49 @@ def get_market_data():
     row['成交额'] = total_amount
 
     try:
-        upsert_market_history(stat_date=row['日期'], row_payload=row)
+        # 统一表头定义：日期 + 11 个指标
+        columns = ['日期'] + [str(market_data.iloc[i]['item']) for i in range(0, 11)]
+        if '成交额' not in columns:
+            columns.append('成交额')
+
+        # 检查CSV是否存在
+        if os.path.exists(csv_file):
+            df = pd.read_csv(csv_file)
+
+            # 兼容历史文件：如果没有“日期”列，则根据当前 schema 修正表头
+            if '日期' not in df.columns:
+                if len(df.columns) == len(columns):
+                    df.columns = columns
+                else:
+                    # 至少确保第一列为日期，避免 KeyError
+                    first_cols = list(df.columns)
+                    first_cols[0] = '日期'
+                    df.columns = first_cols
+            if '成交额' not in df.columns:
+                df['成交额'] = ""
+
+            # 检查是否已存在该日期，避免重复写入
+            if not df[df['日期'] == stat_date].empty:
+                idx = df.index[df['日期'] == stat_date][0]
+                if (
+                    '成交额' in df.columns
+                    and (pd.isna(df.at[idx, '成交额']) or str(df.at[idx, '成交额']).strip() == "")
+                ):
+                    df.at[idx, '成交额'] = row.get('成交额', "")
+                df.to_csv(csv_file, index=False)
+            else:
+                # 新数据插入首行，保持最近日期在上
+                df = pd.concat([pd.DataFrame([row], columns=columns), df], ignore_index=True)
+                df.to_csv(csv_file, index=False)
+        else:
+            # 新建数据，表头：日期及item
+            df = pd.DataFrame([row], columns=columns)
+            df.to_csv(csv_file, index=False)
     except Exception as e:
-        print("写入 market_history 失败:", e)
+        print("写入market_data.csv失败:", e)
 
+    _sync_market_activity_to_mysql(stat_date, market_data, total_amount)
     return sh_df, cyb_df, kcb_df, market_data
-
-
-@st.cache_data(ttl='30m')
-def get_market_history(days: int = 30) -> pd.DataFrame:
-    """从 MySQL 读取市场历史数据（替代 market_data.csv）。"""
-    try:
-        df = load_market_history_df(limit=max(int(days), 30) * 5)
-    except Exception:
-        return pd.DataFrame()
-
-    if df is None or df.empty:
-        return pd.DataFrame()
-
-    if '日期' in df.columns:
-        df['日期'] = pd.to_datetime(df['日期'], errors='coerce')
-        df = df.dropna(subset=['日期']).sort_values('日期').tail(days)
-
-    numeric_cols = ['活跃度', '上涨', '下跌', '涨停', '跌停', '成交额']
-    for col in numeric_cols:
-        if col in df.columns:
-            try:
-                df[col] = df[col].astype(str).str.replace('%', '').str.replace(',', '')
-                df[col] = pd.to_numeric(df[col], errors='coerce')
-            except Exception:
-                df[col] = pd.to_numeric(df[col], errors='coerce')
-
-    return df
 
 
 @st.cache_data(ttl='1d')

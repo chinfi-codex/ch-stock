@@ -6,120 +6,23 @@ import akshare as ak
 import datetime
 import numpy as np
 import plotly.graph_objects as go
-import json
-import re
-from html import escape
 from tools import (
     plotK,
     get_market_data,
     get_all_stocks,
-    get_llm_response,
-    get_longhu_data,
     get_financing_net_buy_series,
     get_gem_pe_series,
-    get_market_history,
 )
 from tools.financial_data import EconomicIndicators
 from tools.storage_utils import save_review_data, load_review_data
 from data_sources import (
     _normalize_top_stocks_df,
-    _safe_market_value,
-    get_zt_pool,
-    get_dt_pool,
     _df_to_records,
     _records_to_df,
     _build_pct_distribution,
-)
-from indicators import (
-    calculate_ma,
-    calculate_ma_slope,
+    get_benchmark_kline,
 )
 
-
-
-def _build_index_snapshot(df):
-    if df is None or df.empty or 'close' not in df.columns:
-        return {}
-    close = pd.to_numeric(df['close'], errors='coerce')
-    ma5 = calculate_ma(close, 5)
-    ma20 = calculate_ma(close, 20)
-    ma60 = calculate_ma(close, 60)
-    recent_60d = _df_to_records(df.tail(60))
-    snapshot = {
-        'close': float(close.iloc[-1]) if not pd.isna(close.iloc[-1]) else None,
-        'ma5': float(ma5.iloc[-1]) if not pd.isna(ma5.iloc[-1]) else None,
-        'ma20': float(ma20.iloc[-1]) if not pd.isna(ma20.iloc[-1]) else None,
-        'ma60': float(ma60.iloc[-1]) if not pd.isna(ma60.iloc[-1]) else None,
-        'ret_5d_pct': float(close.pct_change(5).iloc[-1] * 100) if len(close) > 5 else None,
-        'ret_20d_pct': float(close.pct_change(20).iloc[-1] * 100) if len(close) > 20 else None,
-        'high_20d': float(close.tail(20).max()) if len(close) >= 20 else None,
-        'low_20d': float(close.tail(20).min()) if len(close) >= 20 else None,
-        'ma20_slope': float(calculate_ma_slope(ma20.dropna(), period=5)) if ma20 is not None else None,
-        'recent_60d': recent_60d
-    }
-    return snapshot
-
-
-def _build_zt_tiers(zt_pool):
-    if zt_pool is None or zt_pool.empty:
-        return pd.DataFrame(), pd.DataFrame()
-    df = zt_pool.copy()
-    if '连板数' not in df.columns:
-        return pd.DataFrame(), pd.DataFrame()
-    def _parse_streak_text(value):
-        if value is None or (isinstance(value, float) and pd.isna(value)):
-            return None
-        text = str(value).strip()
-        if text == '首板':
-            return 1
-        match = re.search(r"(\d+)", text)
-        return int(match.group(1)) if match else None
-
-    df['连板'] = df['连板数'].apply(_parse_streak_text)
-    df = df.dropna(subset=['连板'])
-    df['连板'] = df['连板'].astype(int)
-    tier_counts = (
-        df.groupby('连板')
-        .size()
-        .reset_index(name='数量')
-        .sort_values('连板', ascending=False)
-    )
-    return df, tier_counts
-
-
-def _build_dt_tiers(dt_pool):
-    if dt_pool is None or dt_pool.empty:
-        return pd.DataFrame(), pd.DataFrame()
-    df = dt_pool.copy()
-    streak_col = None
-    for candidate in [
-        '连续跌停天数', '连跌天数', '跌停天数', '连续跌停', '连跌', '跌停板数', '跌停数'
-    ]:
-        if candidate in df.columns:
-            streak_col = candidate
-            break
-    if streak_col is None:
-        return pd.DataFrame(), pd.DataFrame()
-
-    def _parse_streak_text(value):
-        if value is None or (isinstance(value, float) and pd.isna(value)):
-            return None
-        text = str(value).strip()
-        if text in {'首跌', '首板', '首日'}:
-            return 1
-        match = re.search(r"(\d+)", text)
-        return int(match.group(1)) if match else None
-
-    df['连续跌停'] = df[streak_col].apply(_parse_streak_text)
-    df = df.dropna(subset=['连续跌停'])
-    df['连续跌停'] = df['连续跌停'].astype(int)
-    tier_counts = (
-        df.groupby('连续跌停')
-        .size()
-        .reset_index(name='数量')
-        .sort_values('连续跌停', ascending=False)
-    )
-    return df, tier_counts
 
 
 def _section_title(title):
@@ -127,161 +30,6 @@ def _section_title(title):
         f"<div style='font-size:26px;font-weight:700;margin:8px 0 8px 0;'>{title}</div>",
         unsafe_allow_html=True,
     )
-
-
-def _split_summary_parts(summary, expected=3):
-    if not summary:
-        return [""] * expected
-    text = summary.replace("\r", "")
-    text = re.sub(r"<br\s*/?>", "\n", text, flags=re.IGNORECASE)
-    text = re.sub(r"^#+\s*", "", text, flags=re.MULTILINE)
-    text = text.replace("•", "\n•")
-    lines = [line.strip() for line in re.split(r"\n+", text) if line.strip()]
-
-    def _clean(line):
-        return re.sub(r"^[\-\*\d\.\)\(、\s•]+", "", line).strip()
-
-    lines = [_clean(line) for line in lines if _clean(line)]
-
-    if len(lines) < expected:
-        parts = re.split(r"[；;。]\s*", text)
-        parts = [_clean(part) for part in parts if _clean(part)]
-        lines = parts
-
-    if not lines:
-        return [""] * expected
-    if len(lines) >= expected:
-        return lines[: expected - 1] + [" ".join(lines[expected - 1 :])]
-    return lines + [""] * (expected - len(lines))
-
-
-def _render_three_blocks(title, labels, contents, tone="neutral"):
-    tone_styles = {
-        "neutral": {
-            "background": "#f7f8fb",
-            "border": "#e6e9f2",
-            "label": "#243b53",
-            "content": "#4a5568",
-        },
-        "profit": {
-            "background": "#fff1f1",
-            "border": "#f3c3c3",
-            "label": "#8e2d2d",
-            "content": "#6f2323",
-        },
-        "loss": {
-            "background": "#eef9f1",
-            "border": "#bfe8ca",
-            "label": "#1f6b3a",
-            "content": "#235238",
-        },
-    }
-    style = tone_styles.get(tone, tone_styles["neutral"])
-    st.markdown(f"#### {title}")
-    cols = st.columns(3)
-    for idx, col in enumerate(cols):
-        label = labels[idx] if idx < len(labels) else f"要点{idx + 1}"
-        content = contents[idx] if idx < len(contents) else ""
-        if not content:
-            content = "—"
-        safe_label = escape(label)
-        safe_content = escape(content).replace("\n", "<br>")
-        with col:
-            st.markdown(
-                f"""
-                <div style="
-                    background:{style['background']};
-                    border:1px solid {style['border']};
-                    border-radius:10px;
-                    padding:12px 14px;
-                    margin:6px 0 12px 0;
-                    min-height:90px;
-                ">
-                    <div style="font-weight:700;color:{style['label']};margin-bottom:6px;">{safe_label}</div>
-                    <div style="color:{style['content']};font-size:0.92rem;line-height:1.5;">{safe_content}</div>
-                </div>
-                """,
-                unsafe_allow_html=True
-            )
-
-
-def _build_top100_summary(top_turnover_records, top_range_records):
-    turnover_df = pd.DataFrame(top_turnover_records) if top_turnover_records else pd.DataFrame()
-    range_df = pd.DataFrame(top_range_records) if top_range_records else pd.DataFrame()
-
-    def _normalize(df):
-        if df is None or df.empty:
-            return pd.DataFrame()
-        df = df.copy()
-        if "代码" in df.columns:
-            df["代码"] = df["代码"].astype(str)
-        if "涨跌幅" in df.columns:
-            df["涨跌幅"] = pd.to_numeric(df["涨跌幅"], errors="coerce")
-        if "成交额" in df.columns:
-            df["成交额"] = pd.to_numeric(df["成交额"], errors="coerce")
-        return df
-
-    turnover_df = _normalize(turnover_df)
-    range_df = _normalize(range_df)
-
-    if turnover_df.empty and range_df.empty:
-        return ""
-
-    lines = []
-    overlap_ratio = None
-    strong_up_ratio = None
-    concentration = None
-
-    if (
-        not turnover_df.empty
-        and not range_df.empty
-        and "代码" in turnover_df.columns
-        and "代码" in range_df.columns
-    ):
-        overlap = set(turnover_df["代码"].dropna()) & set(range_df["代码"].dropna())
-        overlap_count = len(overlap)
-        overlap_ratio = overlap_count / 100
-        lines.append(f"交集: {overlap_count} / 100 ({overlap_ratio * 100:.1f}%)")
-
-    if not turnover_df.empty and "成交额" in turnover_df.columns:
-        amount_sum = turnover_df["成交额"].sum()
-        top10_sum = (
-            turnover_df.sort_values("成交额", ascending=False).head(10)["成交额"].sum()
-        )
-        if amount_sum:
-            concentration = top10_sum / amount_sum
-            lines.append(f"成交额集中度: Top10占比 {concentration * 100:.1f}%")
-
-    if not range_df.empty and "涨跌幅" in range_df.columns:
-        pct = range_df["涨跌幅"]
-        strong_up = (pct >= 7).sum()
-        strong_down = (pct <= -7).sum()
-        strong_up_ratio = strong_up / len(range_df) if len(range_df) else 0
-        median_pct = pct.median()
-        lines.append(f"涨幅强势股(>=7%): {strong_up}，弱势股(<=-7%): {strong_down}")
-        if pd.notna(median_pct):
-            lines.append(f"涨幅中位数: {median_pct:.2f}%")
-
-    tone = "数据不足，难以判断主线集中度"
-    if overlap_ratio is not None and concentration is not None and strong_up_ratio is not None:
-        if overlap_ratio >= 0.35 and concentration >= 0.45 and strong_up_ratio >= 0.25:
-            tone = "主线较清晰，资金与涨幅形成共振"
-        elif overlap_ratio <= 0.2 and strong_up_ratio < 0.2:
-            tone = "轮动与分歧偏多，主线集中度不足"
-        else:
-            tone = "情绪有分歧，资金与涨幅存在错位"
-
-    summary_lines = "<br>".join([f"• {line}" for line in lines])
-    html = (
-        "<div style='background:#f7f7f9;border-left:4px solid #4f7cff;"
-        "border-radius:8px;padding:12px 16px;margin:10px 0 8px 0;"
-        "color:#1f2d3d;font-size:0.95rem;line-height:1.6;'>"
-        f"<b>盘面摘要</b><br>{tone}"
-    )
-    if summary_lines:
-        html += f"<br>{summary_lines}"
-    html += "</div>"
-    return html
 
 
 def _latest_metric_from_df(df, value_col, date_col="date"):
@@ -390,105 +138,431 @@ def build_external_section(days=120):
     }
 
 
-
-LLM_TEMPLATES = {
-    "external_risk": {
-        "system": (
-            "你是外盘与风险资产复盘分析师，擅长基于时间序列做趋势判断。"
-            "回答需客观、可解释、避免过度预测。"
-        ),
-        "prompt": (
-            "以下是外围指标数据（JSON）：\n"
-            "{payload}\n\n"
-            "关注比特币和金价的中期（120天）、短期（两天内）走势趋势，并分别进行分析。\n"
-            "输出格式：\n"
-            "比特币：中期...；短期...\n"
-            "金价：中期...；短期...\n"
-            "要求：中文，简洁专业，不超过120字，不要输出额外说明。"
-        ),
-    },
-    "market_overview": {
-        "system": (
-            "你是专业的A股市场分析师，擅长用技术指标与市场结构数据给出简洁判断。"
-            "回答需客观、可解释、避免过度预测。"
-        ),
-        "prompt": (
-            "以下是三大指数与大盘整体数据的摘要（JSON）：\\n"
-            "{payload}\\n\\n"
-            "请完成技术分析总结：大盘当前的形态：从量价关系，macd等技术指标判断大盘日内走势\\n"
-            "重点关注上证指数趋势，以4050为支撑，在上方箱体内的运作趋势，关注创业板是否有效放量突破350，科创板趋势性\\n"
-            "输出中文，简洁专业，注意合理分段，总计不超过200字，使用markdown格式输出。"
-        ),
-    },
-    "market_style": {
-        "system": (
-            "你是A股市场情绪与短线风格分析师，"
-            "需要根据连板数据和涨停类指标评估市场结构，"
-            "从情绪和磁吸效应角度简洁归纳市场风格。"
-        ),
-        "prompt": (
-            "以下是今日连板与涨停数据摘要（JSON）：\\n"
-            "{payload}\\n\\n"
-            "请基于连板数据、涨停炸板率、连板高度、连板股家数"
-            "总结市场风格，分段输出，简洁专业，使用markdown格式输出。"
-        ),
-    },
-    "profit_effect": {
-        "system": (
-            "你是A股市场复盘分析师，擅长从涨幅Top100数据归纳赚钱效应。"
-            "回答需客观、可解释、避免过度预测。"
-        ),
-        "prompt": (
-            "以下是全市场涨幅Top100股票数据摘要（JSON）：\n"
-            "{payload}\n\n"
-            "请结构化总结赚钱效应，严格输出3行，按顺序对应："
-            "1) 强势风格/方向 2) 涨幅集中度 3) 情绪温度与持续性。\n"
-            "格式要求：\n"
-            "1. <一句话>\n"
-            "2. <一句话>\n"
-            "3. <一句话>\n"
-            "每行不超过100字；不要输出标题、前后说明、代码块。"
-        ),
-    },
-    "loss_effect": {
-        "system": (
-            "你是A股市场复盘分析师，擅长从跌幅Top100数据归纳亏钱效应。"
-            "回答需客观、可解释、避免过度预测。"
-        ),
-        "prompt": (
-            "以下是全市场跌幅Top100股票数据摘要（JSON）：\n"
-            "{payload}\n\n"
-            "请结构化总结亏钱效应，严格输出3行，按顺序对应："
-            "1) 弱势风格/方向 2) 跌幅集中度 3) 风险偏好与恐慌程度。\n"
-            "格式要求：\n"
-            "1. <一句话>\n"
-            "2. <一句话>\n"
-            "3. <一句话>\n"
-            "每行不超过100字；不要输出标题、前后说明、代码块。"
-        ),
-    },
-}
+def _to_iso_date(value):
+    dt = pd.to_datetime(value, errors="coerce")
+    if pd.isna(dt):
+        return None
+    return dt.strftime("%Y-%m-%d")
 
 
-@st.cache_data(ttl="1h")
-def llm_summarize(template_id, payload_str):
-    template = LLM_TEMPLATES.get(template_id)
-    if not template:
-        return ""
-    prompt = template["prompt"].format(payload=payload_str)
+def _query_mysql(sql, params=None):
     try:
-        return get_llm_response(prompt, system_message=template.get("system"))
-    except Exception as exc:
-        return f"AIæ‘˜è¦ç”Ÿæˆå¤±è´¥ï¼š{exc}"
+        from database.db_manager import get_db
+    except Exception:
+        return []
+    try:
+        with get_db() as db:
+            return db.query(sql, params or ())
+    except Exception:
+        return []
+
+
+def _query_one_mysql(sql, params=None):
+    rows = _query_mysql(sql, params)
+    if not rows:
+        return None
+    return rows[0]
+
+
+def _load_external_asset_series_from_mysql(asset_code, select_date, days=120):
+    target_date = _to_iso_date(select_date)
+    if not target_date:
+        return pd.DataFrame()
+    safe_limit = max(int(days) * 3, 90)
+    rows = _query_mysql(
+        f"""
+        SELECT trade_date AS date, close_price AS value
+        FROM external_asset_daily
+        WHERE asset_code = %s AND trade_date <= %s
+        ORDER BY trade_date DESC
+        LIMIT {safe_limit}
+        """,
+        (asset_code, target_date),
+    )
+    if not rows:
+        return pd.DataFrame()
+    df = pd.DataFrame(rows)
+    if df.empty:
+        return df
+    df["date"] = pd.to_datetime(df["date"], errors="coerce")
+    df["value"] = pd.to_numeric(df["value"], errors="coerce")
+    df = df.dropna(subset=["date", "value"]).sort_values("date")
+    return df
+
+
+def _build_external_metric_from_df(df, change_kind="pct", days=120):
+    metric = _latest_metric_from_df(df, "value")
+    series = _series_from_df(df, "value", days)
+    if not metric:
+        return None
+    current = metric.get("value")
+    prev = metric.get("prev_value")
+    if change_kind == "bp":
+        change = (current - prev) * 100 if prev is not None else None
+    else:
+        change = _calc_pct_change(current, prev)
+    return {
+        "date": metric.get("date"),
+        "value": current,
+        "prev_value": prev,
+        "change": change,
+        "series": series,
+    }
+
+
+def build_external_section_from_mysql(select_date, days=120):
+    btc_df = _load_external_asset_series_from_mysql("BTCUSD", select_date, days=days)
+    xau_df = _load_external_asset_series_from_mysql("XAUUSD", select_date, days=days)
+    us10y_df = _load_external_asset_series_from_mysql("US10Y", select_date, days=days)
+    return {
+        "btc": _build_external_metric_from_df(btc_df, "pct", days=days),
+        "us10y": _build_external_metric_from_df(us10y_df, "bp", days=days),
+        "xau": _build_external_metric_from_df(xau_df, "pct", days=days),
+    }
+
+
+def _load_realtime_indices(select_date):
+    end_date = _to_iso_date(select_date) or datetime.datetime.now().strftime("%Y-%m-%d")
+    start_date = (pd.to_datetime(end_date) - pd.Timedelta(days=420)).strftime("%Y-%m-%d")
+    sh_df = get_benchmark_kline(start_date=start_date, end_date=end_date, symbol="sh000001")
+    cyb_df = get_benchmark_kline(start_date=start_date, end_date=end_date, symbol="sz399006")
+    kcb_df = get_benchmark_kline(start_date=start_date, end_date=end_date, symbol="sh000688")
+    return {
+        "sh_df": _df_to_records(sh_df),
+        "cyb_df": _df_to_records(cyb_df),
+        "kcb_df": _df_to_records(kcb_df),
+    }
+
+
+def _load_range_distribution_from_mysql(select_date):
+    target_date = _to_iso_date(select_date)
+    if not target_date:
+        return []
+    date_row = _query_one_mysql(
+        """
+        SELECT MAX(trade_date) AS trade_date
+        FROM stock_daily_basic
+        WHERE trade_date <= %s
+        """,
+        (target_date,),
+    )
+    if not date_row or not date_row.get("trade_date"):
+        return []
+    stat_date = pd.to_datetime(date_row.get("trade_date"), errors="coerce")
+    if pd.isna(stat_date):
+        return []
+    rows = _query_mysql(
+        """
+        SELECT sdb.pct_change AS pct
+        FROM stock_daily_basic sdb
+        LEFT JOIN stock_master sm ON sdb.ts_code = sm.ts_code
+        WHERE sdb.trade_date = %s
+          AND COALESCE(sm.is_st, 0) = 0
+          AND COALESCE(sm.is_delist, 0) = 0
+          AND COALESCE(sm.is_bse, 0) = 0
+          AND (sm.symbol IS NULL OR (sm.symbol NOT LIKE '8%%' AND sm.symbol NOT LIKE '4%%'))
+        """,
+        (stat_date.strftime("%Y-%m-%d"),),
+    )
+    if not rows:
+        return []
+    df = pd.DataFrame(rows)
+    if df.empty:
+        return []
+    df["pct"] = pd.to_numeric(df["pct"], errors="coerce")
+    df = df.dropna(subset=["pct"])
+    if df.empty:
+        return []
+    return _build_pct_distribution(df)
+
+
+def _load_market_overview_from_mysql(select_date):
+    target_date = _to_iso_date(select_date)
+    if not target_date:
+        return {
+            "上涨": None,
+            "下跌": None,
+            "涨停": None,
+            "跌停": None,
+            "活跃度": None,
+            "range_distribution": [],
+        }
+    row = _query_one_mysql(
+        """
+        SELECT trade_date, up_count, down_count, zt_count, dt_count, activity_index
+        FROM market_activity_daily
+        WHERE trade_date <= %s
+        ORDER BY trade_date DESC
+        LIMIT 1
+        """,
+        (target_date,),
+    )
+    if not row:
+        return {
+            "上涨": None,
+            "下跌": None,
+            "涨停": None,
+            "跌停": None,
+            "活跃度": None,
+            "range_distribution": _load_range_distribution_from_mysql(select_date),
+        }
+    return {
+        "上涨": row.get("up_count"),
+        "下跌": row.get("down_count"),
+        "涨停": row.get("zt_count"),
+        "跌停": row.get("dt_count"),
+        "活跃度": row.get("activity_index"),
+        "range_distribution": _load_range_distribution_from_mysql(select_date),
+    }
+
+
+def _resolve_group_trade_date(select_date, group_type):
+    target_date = _to_iso_date(select_date)
+    if not target_date:
+        return None
+    row = _query_one_mysql(
+        """
+        SELECT MAX(trade_date) AS trade_date
+        FROM stock_group_member
+        WHERE trade_date <= %s AND group_type = %s
+        """,
+        (target_date, group_type),
+    )
+    if not row:
+        return None
+    trade_date = pd.to_datetime(row.get("trade_date"), errors="coerce")
+    if pd.isna(trade_date):
+        return None
+    return trade_date.strftime("%Y-%m-%d")
+
+
+def _load_group_records_from_mysql(select_date, group_type):
+    trade_date = _resolve_group_trade_date(select_date, group_type)
+    if not trade_date:
+        return []
+    rows = _query_mysql(
+        """
+        SELECT rank_no, ts_code, symbol, name, pct_change, amount, total_mv
+        FROM stock_group_member
+        WHERE trade_date = %s AND group_type = %s
+        ORDER BY rank_no ASC
+        """,
+        (trade_date, group_type),
+    )
+    if not rows:
+        return []
+    records = []
+    for row in rows:
+        code = str(row.get("symbol") or "").strip()
+        if not code:
+            ts_code = str(row.get("ts_code") or "")
+            code = ts_code.split(".")[0] if ts_code else ""
+
+        amount = pd.to_numeric(row.get("amount"), errors="coerce")
+        total_mv = pd.to_numeric(row.get("total_mv"), errors="coerce")
+        pct = pd.to_numeric(row.get("pct_change"), errors="coerce")
+
+        records.append(
+            {
+                "code": code,
+                "name": str(row.get("name") or ""),
+                "pct": None if pd.isna(pct) else float(pct),
+                # stock_group_member: amount(千元), total_mv(万元)
+                "amount": None if pd.isna(amount) else float(amount) * 1000,
+                "mkt_cap": None if pd.isna(total_mv) else float(total_mv) * 10000,
+            }
+        )
+    return records
+
+
+def _build_top100_range_from_gainers(gainers_records):
+    if not gainers_records:
+        return {"sh_stocks": [], "cyb_kcb_stocks": []}
+    df = pd.DataFrame(gainers_records)
+    if df.empty or not {"code", "name", "pct", "amount"}.issubset(df.columns):
+        return {"sh_stocks": [], "cyb_kcb_stocks": []}
+    df["pct"] = pd.to_numeric(df["pct"], errors="coerce")
+    df = df.dropna(subset=["pct"]).sort_values("pct", ascending=False).head(100)
+    code6 = df["code"].astype(str).str.extract(r"(\d{6})", expand=False).fillna("")
+    sh_df = df[
+        (code6.str.startswith("6") | code6.str.startswith("0"))
+        & ~code6.str.startswith("688")
+    ]
+    cyb_kcb_df = df[code6.str.startswith("3") | code6.str.startswith("688")]
+    return {
+        "sh_stocks": sh_df[["name", "code", "pct", "amount"]].to_dict(orient="records"),
+        "cyb_kcb_stocks": cyb_kcb_df[["name", "code", "pct", "amount"]].to_dict(orient="records"),
+    }
+
+
+def build_top100_section_from_mysql(select_date):
+    turnover_records = _load_group_records_from_mysql(select_date, "top_100_turnover")
+    gainers_records = _load_group_records_from_mysql(select_date, "top_100_gainers")
+    losers_records = _load_group_records_from_mysql(select_date, "top_100_losers")
+    top_100_range = _build_top100_range_from_gainers(gainers_records)
+    return {
+        "top_100_turnover": turnover_records,
+        "top_100_range": top_100_range,
+        "top_100_gainers": gainers_records[:100],
+        "top_100_losers": losers_records[:100],
+    }
+
+
+def _load_financing_series_from_mysql(select_date, limit=60):
+    target_date = _to_iso_date(select_date)
+    if not target_date:
+        return []
+    safe_limit = max(1, int(limit))
+    rows = _query_mysql(
+        f"""
+        SELECT trade_date AS date, rz_net_buy AS value
+        FROM margin_trade_daily
+        WHERE trade_date <= %s
+        ORDER BY trade_date DESC
+        LIMIT {safe_limit}
+        """,
+        (target_date,),
+    )
+    if not rows:
+        return []
+    df = pd.DataFrame(rows)
+    if df.empty:
+        return []
+    df["date"] = pd.to_datetime(df["date"], errors="coerce")
+    df["value"] = pd.to_numeric(df["value"], errors="coerce")
+    df = df.dropna(subset=["date", "value"]).sort_values("date")
+    if df.empty:
+        return []
+    df["date"] = df["date"].dt.strftime("%Y-%m-%d")
+    return df.rename(columns={"value": "融资净买入"})[["date", "融资净买入"]].to_dict(orient="records")
+
+
+def _load_gem_pe_series_from_mysql(select_date, limit=500):
+    target_date = _to_iso_date(select_date)
+    if not target_date:
+        return []
+    safe_limit = max(1, int(limit))
+    rows = _query_mysql(
+        f"""
+        SELECT trade_date AS date, pe_value AS value
+        FROM gem_pe_daily
+        WHERE trade_date <= %s
+        ORDER BY trade_date DESC
+        LIMIT {safe_limit}
+        """,
+        (target_date,),
+    )
+    if not rows:
+        return []
+    df = pd.DataFrame(rows)
+    if df.empty:
+        return []
+    df["date"] = pd.to_datetime(df["date"], errors="coerce")
+    df["value"] = pd.to_numeric(df["value"], errors="coerce")
+    df = df.dropna(subset=["date", "value"]).sort_values("date")
+    if df.empty:
+        return []
+    df["date"] = df["date"].dt.strftime("%Y-%m-%d")
+    return df.rename(columns={"value": "市盈率"})[["date", "市盈率"]].to_dict(orient="records")
+
+
+
+def _find_market_value_by_keywords(market_data, keywords, default=None):
+    if market_data is None or market_data.empty:
+        return default
+    if not {"item", "value"}.issubset(set(market_data.columns)):
+        return default
+    for _, row in market_data.iterrows():
+        item = str(row.get("item", ""))
+        if any(k in item for k in keywords):
+            return row.get("value")
+    return default
+
+
+def _get_market_snapshot_from_mysql(target_date=None):
+    try:
+        from database.db_manager import get_db
+    except Exception:
+        return None
+
+    try:
+        with get_db() as db:
+            if target_date is not None:
+                dt = pd.to_datetime(target_date, errors="coerce")
+                if pd.isna(dt):
+                    return None
+                return db.query_one(
+                    """
+                    SELECT trade_date, up_count, down_count, zt_count, dt_count, activity_index
+                    FROM market_activity_daily
+                    WHERE trade_date = %s
+                    LIMIT 1
+                    """,
+                    (dt.strftime("%Y-%m-%d"),),
+                )
+            return db.query_one(
+                """
+                SELECT trade_date, up_count, down_count, zt_count, dt_count, activity_index
+                FROM market_activity_daily
+                ORDER BY trade_date DESC
+                LIMIT 1
+                """
+            )
+    except Exception:
+        return None
+
+
+def _load_market_history_from_mysql(limit=30):
+    try:
+        from database.db_manager import get_db
+    except Exception:
+        return pd.DataFrame()
+
+    try:
+        safe_limit = max(1, int(limit))
+        with get_db() as db:
+            rows = db.query(
+                f"""
+                SELECT
+                    trade_date AS 日期,
+                    up_count AS 上涨,
+                    down_count AS 下跌,
+                    zt_count AS 涨停,
+                    dt_count AS 跌停,
+                    activity_index AS 活跃度,
+                    total_amount AS 成交额
+                FROM market_activity_daily
+                ORDER BY trade_date DESC
+                LIMIT {safe_limit}
+                """
+            )
+        if not rows:
+            return pd.DataFrame()
+        df = pd.DataFrame(rows)
+        if df.empty:
+            return df
+        df["日期"] = pd.to_datetime(df["日期"], errors="coerce")
+        df = df.dropna(subset=["日期"]).sort_values("日期")
+        return df
+    except Exception:
+        return pd.DataFrame()
 
 
 def build_market_section(select_date, all_stocks_df=None):
     sh_df, cyb_df, kcb_df, market_data = get_market_data()
-    up_stocks = _safe_market_value(market_data, '涓婃定')
-    down_stocks = _safe_market_value(market_data, '涓嬭穼')
-    limit_up = _safe_market_value(market_data, '娑ㄥ仠')
-    limit_down = _safe_market_value(market_data, '璺屽仠')
-    activity = _safe_market_value(market_data, '娲昏穬搴?')
+    mysql_snapshot = _get_market_snapshot_from_mysql(select_date)
+    if mysql_snapshot:
+        up_stocks = mysql_snapshot.get("up_count")
+        down_stocks = mysql_snapshot.get("down_count")
+        limit_up = mysql_snapshot.get("zt_count")
+        limit_down = mysql_snapshot.get("dt_count")
+        activity = mysql_snapshot.get("activity_index")
+    else:
+        up_stocks = _find_market_value_by_keywords(market_data, ["上涨"])
+        down_stocks = _find_market_value_by_keywords(market_data, ["下跌"])
+        limit_up = _find_market_value_by_keywords(market_data, ["涨停"])
+        limit_down = _find_market_value_by_keywords(market_data, ["跌停"])
+        activity = _find_market_value_by_keywords(market_data, ["活跃", "情绪"])
     if isinstance(activity, str) and '%' in str(activity):
         activity = str(activity).replace('%', '')
 
@@ -499,12 +573,12 @@ def build_market_section(select_date, all_stocks_df=None):
             all_stocks_df = None
 
     market_overview = {
-        '涓婃定': up_stocks,
-        '涓嬭穼': down_stocks,
-        '娑ㄥ仠': limit_up,
-        '璺屽仠': limit_down,
-        '娲昏穬搴?': activity,
-        'range_distribution': _build_pct_distribution(all_stocks_df)
+        "上涨": up_stocks,
+        "下跌": down_stocks,
+        "涨停": limit_up,
+        "跌停": limit_down,
+        "活跃度": activity,
+        "range_distribution": _build_pct_distribution(all_stocks_df),
     }
     indices = {
         'sh_df': _df_to_records(sh_df),
@@ -582,9 +656,13 @@ def build_review_data(select_date, show_modules=None):
     if _should("market"):
         market_section, all_stocks_df = build_market_section(select_date, all_stocks_df)
         review_data.update(market_section)
+        review_data["financing_series"] = []
+        review_data["gem_pe_series"] = []
     else:
         review_data['indices'] = {'sh_df': [], 'cyb_df': [], 'kcb_df': []}
         review_data['market_overview'] = {}
+        review_data["financing_series"] = []
+        review_data["gem_pe_series"] = []
 
     if _should("top100"):
         top_section, all_stocks_df = build_top100_section(select_date, all_stocks_df)
@@ -595,7 +673,25 @@ def build_review_data(select_date, show_modules=None):
         if all_stocks_df is not None and not all_stocks_df.empty and "pct" in all_stocks_df.columns:
             view = all_stocks_df.copy()
             view["pct"] = pd.to_numeric(view["pct"], errors="coerce")
-            view = view.dropna(subset=["pct"])
+            if "amount" in view.columns:
+                view["amount"] = pd.to_numeric(view["amount"], errors="coerce")
+            if "mkt_cap" in view.columns:
+                view["mkt_cap"] = pd.to_numeric(view["mkt_cap"], errors="coerce")
+            if "code" in view.columns:
+                view["code"] = view["code"].astype(str)
+            if "name" in view.columns:
+                view["name"] = view["name"].astype(str)
+
+            view = view.dropna(subset=[col for col in ["pct", "code", "name"] if col in view.columns])
+
+            # 去除 ST + 北交（4/8开头或 bj 前缀）
+            if {"code", "name"}.issubset(view.columns):
+                code_str = view["code"].astype(str).str.lower().str.strip()
+                code6 = code_str.str.extract(r"(\d{6})", expand=False).fillna("")
+                is_bj = code_str.str.startswith("bj") | code6.str.startswith(("4", "8"))
+                is_st = view["name"].astype(str).str.upper().str.contains("ST", na=False)
+                view = view[~is_bj & ~is_st]
+
             gainers_df = view.sort_values("pct", ascending=False).head(100)
             losers_df = view.sort_values("pct", ascending=True).head(100)
             keep_cols = [col for col in ["code", "name", "pct", "amount", "mkt_cap"] if col in view.columns]
@@ -607,6 +703,40 @@ def build_review_data(select_date, show_modules=None):
     else:
         review_data['top_100_turnover'] = [] 
         review_data['top_100_range'] = {'sh_stocks': [], 'cyb_kcb_stocks': []}
+        review_data["top_100_gainers"] = []
+        review_data["top_100_losers"] = []
+
+    return review_data
+
+
+def build_review_data_from_mysql(select_date, show_modules=None):
+    review_data = {"date": select_date.strftime("%Y-%m-%d")}
+
+    def _should(key):
+        return show_modules is None or show_modules.get(key, True)
+
+    if _should("external"):
+        review_data["external"] = build_external_section_from_mysql(select_date)
+    else:
+        review_data["external"] = {}
+
+    if _should("market"):
+        review_data["indices"] = _load_realtime_indices(select_date)
+        review_data["market_overview"] = _load_market_overview_from_mysql(select_date)
+        # 融资净买入和创业板PE前端统一走实时，不从MySQL读取
+        review_data["financing_series"] = []
+        review_data["gem_pe_series"] = []
+    else:
+        review_data["indices"] = {"sh_df": [], "cyb_df": [], "kcb_df": []}
+        review_data["market_overview"] = {}
+        review_data["financing_series"] = []
+        review_data["gem_pe_series"] = []
+
+    if _should("top100"):
+        review_data.update(build_top100_section_from_mysql(select_date))
+    else:
+        review_data["top_100_turnover"] = []
+        review_data["top_100_range"] = {"sh_stocks": [], "cyb_kcb_stocks": []}
         review_data["top_100_gainers"] = []
         review_data["top_100_losers"] = []
 
@@ -706,51 +836,6 @@ def display_review_data(review_data, show_modules=None):
             if us10y_date:
                 st.caption(f"\u65e5\u671f: {us10y_date}")
             _render_sparkline(us10y.get("series") or [], "#2f80ed")
-
-        risk_payload = {
-            "btc_usd": {
-                "date": _format_date(btc.get("date")),
-                "price": btc.get("value"),
-                "change_pct": btc.get("change"),
-                "series": btc.get("series") or [],
-            },
-            "us10y_yield": {
-                "date": _format_date(us10y.get("date")),
-                "yield_pct": us10y.get("value"),
-                "change_bp": us10y.get("change"),
-                "series": us10y.get("series") or [],
-            },
-            "xau_gold": {
-                "date": _format_date(xau.get("date")),
-                "price": xau.get("value"),
-                "change_pct": xau.get("change"),
-                "series": xau.get("series") or [],
-            },
-        }
-        has_data = any(metric.get("value") is not None for metric in (btc, us10y, xau))
-        if has_data:
-            payload_str = json.dumps(risk_payload, ensure_ascii=False)
-            risk_summary = llm_summarize("external_risk", payload_str)
-            if risk_summary:
-                risk_summary_html = risk_summary.replace("\n", "<br>")
-                st.markdown(
-                    f"""
-                    <div style="
-                        background:#eef4ff;
-                        border-left:4px solid #2f80ed;
-                        border-radius:8px;
-                        padding:12px 16px;
-                        margin:8px 0 16px 0;
-                        color:#1f2d3d;
-                        font-size:0.95rem;
-                        line-height:1.6;
-                    ">
-                        {risk_summary_html}
-                    </div>
-                    """,
-                    unsafe_allow_html=True
-                )
-
         st.markdown("---")
 
     if _show("market"):
@@ -781,206 +866,202 @@ def display_review_data(review_data, show_modules=None):
             if not kcb_df.empty:
                 plotK(kcb_df)
 
-        try:
-            df_history = get_market_history(30)
-            if not df_history.empty:
-                latest_row = df_history.iloc[-1]
-                up_stocks = latest_row.get('上涨', up_stocks)
-                down_stocks = latest_row.get('下跌', down_stocks)
-                limit_up = latest_row.get('涨停', limit_up)
-                limit_down = latest_row.get('跌停', limit_down)
-                activity = latest_row.get('活跃度', activity)
+        import os
+        csv_file = os.path.join('datas', 'market_data.csv')
+        df_history_mysql = _load_market_history_from_mysql(limit=30)
+        if (not df_history_mysql.empty) or os.path.exists(csv_file):
+            try:
+                df_history = df_history_mysql.copy()
+                if df_history.empty:
+                    df_history = pd.read_csv(csv_file)
+                df_history = df_history.loc[:, ~df_history.columns.str.contains('^Unnamed')]
+                if '日期' in df_history.columns:
+                    df_history['日期'] = pd.to_datetime(df_history['日期'], errors='coerce')
+                    df_history = df_history.dropna(subset=['日期'])
+                    df_history = df_history.sort_values('日期')
+                    df_history = df_history.tail(30)
+                    numeric_cols = ['上涨', '下跌', '涨停', '跌停', '活跃度', '成交额']
+                    for col in numeric_cols:
+                        if col in df_history.columns:
+                            if col == '活跃度':
+                                df_history[col] = df_history[col].astype(str).str.replace('%', '').astype(float)
+                            else:
+                                df_history[col] = pd.to_numeric(df_history[col], errors='coerce')
 
-                summary_payload = {
-                    'indices': {
-                        '上证指数': _build_index_snapshot(sh_df),
-                        '创业板指数': _build_index_snapshot(cyb_df),
-                        '科创板指数': _build_index_snapshot(kcb_df)
-                    },
-                }
-                payload_str = json.dumps(summary_payload, ensure_ascii=False)
-                llm_summary = llm_summarize('market_overview', payload_str)
-                if llm_summary:
-                    llm_summary_html = llm_summary.replace("\n", "<br>")
-                    st.markdown(
-                        f"""
-                        <div style="
-                            background: #f2f6ff;
-                            border-left: 4px solid #4c6ef5;
-                            border-radius: 8px;
-                            padding: 12px 16px;
-                            margin: 8px 0 16px 0;
-                            color: #1a2b49;
-                            font-size: 0.95rem;
-                            line-height: 1.6;
-                        ">
-                            {llm_summary_html}
-                        </div>
-                        """,
-                        unsafe_allow_html=True
-                    )
+                    latest_row = df_history.iloc[-1] if not df_history.empty else None
+                    if latest_row is not None:
+                        up_stocks = latest_row.get('上涨', up_stocks)
+                        down_stocks = latest_row.get('下跌', down_stocks)
+                        limit_up = latest_row.get('涨停', limit_up)
+                        limit_down = latest_row.get('跌停', limit_down)
+                        activity = latest_row.get('活跃度', activity)
+                    # 这两项固定实时获取，不走MySQL持久化数据
+                    fin_series = get_financing_net_buy_series(60)
+                    gem_pe_series = get_gem_pe_series(500)
 
-                fin_series = get_financing_net_buy_series(60)
-                gem_pe_series = get_gem_pe_series(500)
+                    first_row = st.columns(3)
+                    with first_row[0]:
+                        if '成交额' in df_history.columns:
+                            fig_amount = go.Figure()
+                            fig_amount.add_trace(go.Scatter(
+                                x=df_history['日期'],
+                                y=df_history['成交额'],
+                                mode='lines+markers',
+                                name='成交额',
+                                line=dict(color='#4c6ef5', width=2),
+                                marker=dict(size=4)
+                            ))
+                            fig_amount.update_layout(
+                                title='成交额',
+                                xaxis_title='日期',
+                                yaxis_title='成交额',
+                                height=300,
+                                hovermode='x unified'
+                            )
+                            st.plotly_chart(fig_amount, use_container_width=True)
 
-                first_row = st.columns(3)
-                with first_row[0]:
-                    if '成交额' in df_history.columns:
-                        fig_amount = go.Figure()
-                        fig_amount.add_trace(go.Scatter(
-                            x=df_history['日期'],
-                            y=df_history['成交额'],
-                            mode='lines+markers',
-                            name='成交额',
-                            line=dict(color='#4c6ef5', width=2),
-                            marker=dict(size=4)
-                        ))
-                        fig_amount.update_layout(
-                            title='成交额',
-                            xaxis_title='日期',
-                            yaxis_title='成交额',
-                            height=300,
-                            hovermode='x unified'
-                        )
-                        st.plotly_chart(fig_amount, use_container_width=True)
+                    with first_row[1]:
+                        if '活跃度' in df_history.columns:
+                            fig_activity = go.Figure()
+                            fig_activity.add_trace(go.Scatter(
+                                x=df_history['日期'],
+                                y=df_history['活跃度'],
+                                mode='lines+markers',
+                                name='情绪指数',
+                                line=dict(color='#f39c12', width=2),
+                                marker=dict(size=4)
+                            ))
+                            fig_activity.update_layout(
+                                title='情绪指数（活跃度）',
+                                xaxis_title='日期',
+                                yaxis_title='活跃度 (%)',
+                                height=300,
+                                hovermode='x unified'
+                            )
+                            st.plotly_chart(fig_activity, use_container_width=True)
 
-                with first_row[1]:
-                    if '活跃度' in df_history.columns:
-                        fig_activity = go.Figure()
-                        fig_activity.add_trace(go.Scatter(
-                            x=df_history['日期'],
-                            y=df_history['活跃度'],
-                            mode='lines+markers',
-                            name='情绪指数',
-                            line=dict(color='#f39c12', width=2),
-                            marker=dict(size=4)
-                        ))
-                        fig_activity.update_layout(
-                            title='情绪指数',
-                            xaxis_title='日期',
-                            yaxis_title='活跃度',
-                            height=300,
-                            hovermode='x unified'
-                        )
-                        st.plotly_chart(fig_activity, use_container_width=True)
+                    with first_row[2]:
+                        if fin_series is not None and not fin_series.empty:
+                            fin_series = fin_series.sort_values('date')
+                            colors = fin_series['融资净买入'].apply(lambda x: '#e74c3c' if x >= 0 else '#2ecc71')
+                            fig_financing = go.Figure(go.Bar(
+                                x=fin_series['date'],
+                                y=fin_series['融资净买入'],
+                                marker_color=colors,
+                                name='融资净买入',
+                                hovertemplate='%{x|%Y-%m-%d}<br>净买入: %{y:.0f}<extra></extra>'
+                            ))
+                            fig_financing.update_layout(
+                                title='融资净买入（近60交易日）',
+                                xaxis_title='日期',
+                                yaxis_title='金额',
+                                height=300,
+                                hovermode='x unified',
+                                bargap=0.2
+                            )
+                            st.plotly_chart(fig_financing, use_container_width=True)
 
-                with first_row[2]:
-                    if not fin_series.empty and 'date' in fin_series.columns and '融资净买入' in fin_series.columns:
-                        fig_fin = go.Figure()
-                        fig_fin.add_trace(go.Scatter(
-                            x=fin_series['date'],
-                            y=fin_series['融资净买入'],
-                            mode='lines+markers',
-                            name='融资净买入',
-                            line=dict(color='#16a085', width=2),
-                            marker=dict(size=4),
-                            hovertemplate='%{x|%Y-%m-%d}<br>融资净买入: %{y:,.0f}<extra></extra>'
-                        ))
-                        fig_fin.update_layout(
-                            title='融资净买入（近60交易日）',
-                            xaxis_title='日期',
-                            yaxis_title='融资净买入',
-                            height=300,
-                            hovermode='x unified'
-                        )
-                        st.plotly_chart(fig_fin, use_container_width=True)
-                    else:
-                        st.info("暂无融资净买入数据")
-
-                second_row = st.columns(3)
-                with second_row[0]:
-                    if '上涨' in df_history.columns and '下跌' in df_history.columns:
-                        fig_updown = go.Figure()
-                        fig_updown.add_trace(go.Bar(
-                            x=df_history['日期'],
-                            y=df_history['上涨'],
-                            name='上涨家数',
-                            marker_color='#2ecc71',
-                            opacity=0.75,
-                        ))
-                        fig_updown.add_trace(go.Bar(
-                            x=df_history['日期'],
-                            y=df_history['下跌'],
-                            name='下跌家数',
-                            marker_color='#e74c3c',
-                            opacity=0.75,
-                        ))
-                        fig_updown.update_layout(
-                            title='涨跌家数对比',
-                            xaxis_title='日期',
-                            yaxis_title='家数',
-                            barmode='group',
-                            height=300,
-                            hovermode='x unified'
-                        )
-                        st.plotly_chart(fig_updown, use_container_width=True)
-
-                with second_row[1]:
-                    if '涨停' in df_history.columns and '跌停' in df_history.columns:
-                        fig_limit = go.Figure()
-                        fig_limit.add_trace(go.Bar(
-                            x=df_history['日期'],
-                            y=df_history['涨停'],
-                            name='涨停数',
-                            marker_color='#e74c3c',
-                            opacity=0.75,
-                        ))
-                        fig_limit.add_trace(go.Bar(
-                            x=df_history['日期'],
-                            y=df_history['跌停'],
-                            name='跌停数',
-                            marker_color='#3498db',
-                            opacity=0.75,
-                        ))
-                        fig_limit.update_layout(
-                            title='涨停/跌停数量',
-                            xaxis_title='日期',
-                            yaxis_title='数量',
-                            barmode='group',
-                            height=300,
-                            hovermode='x unified'
-                        )
-                        st.plotly_chart(fig_limit, use_container_width=True)
-
-                with second_row[2]:
-                    if not gem_pe_series.empty and 'date' in gem_pe_series.columns and '市盈率' in gem_pe_series.columns:
-                        fig_gem_pe = go.Figure()
-                        fig_gem_pe.add_trace(go.Scatter(
-                            x=gem_pe_series['date'],
-                            y=gem_pe_series['市盈率'],
-                            mode='lines+markers',
-                            name='创业板市盈率',
-                            line=dict(color='#1f77b4', width=2),
-                            marker=dict(size=4),
-                            hovertemplate='%{x|%Y-%m-%d}<br>PE: %{y:.2f}<extra></extra>'
-                        ))
-                        fig_gem_pe.update_layout(
-                            title='创业板市盈率（近500交易日）',
-                            xaxis_title='日期',
-                            yaxis_title='PE',
-                            height=300,
-                            hovermode='x unified'
-                        )
-                        st.plotly_chart(fig_gem_pe, use_container_width=True)
-                    else:
-                        st.info("暂无创业板市盈率数据")
-        except Exception as e:
-            st.warning(f"读取历史市场数据失败: {e}")
+                    second_row = st.columns(3)
+                    with second_row[0]:
+                        if '上涨' in df_history.columns and '下跌' in df_history.columns:
+                            fig_up_down = go.Figure()
+                            fig_up_down.add_trace(go.Scatter(
+                                x=df_history['日期'],
+                                y=df_history['上涨'],
+                                mode='lines+markers',
+                                name='上涨数',
+                                line=dict(color='#e74c3c', width=2),
+                                marker=dict(size=4)
+                            ))
+                            fig_up_down.add_trace(go.Scatter(
+                                x=df_history['日期'],
+                                y=df_history['下跌'],
+                                mode='lines+markers',
+                                name='下跌数',
+                                line=dict(color='#2ecc71', width=2),
+                                marker=dict(size=4)
+                            ))
+                            fig_up_down.update_layout(
+                                title='上涨数 vs 下跌数',
+                                xaxis_title='日期',
+                                yaxis_title='数量',
+                                height=300,
+                                hovermode='x unified',
+                                legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
+                            )
+                            st.plotly_chart(fig_up_down, use_container_width=True)
+                    with second_row[1]:
+                        if '涨停' in df_history.columns and '跌停' in df_history.columns:
+                            fig_limit = go.Figure()
+                            fig_limit.add_trace(go.Scatter(
+                                x=df_history['日期'],
+                                y=df_history['涨停'],
+                                mode='lines+markers',
+                                name='涨停数',
+                                line=dict(color='#c0392b', width=2),
+                                marker=dict(size=4)
+                            ))
+                            fig_limit.add_trace(go.Scatter(
+                                x=df_history['日期'],
+                                y=df_history['跌停'],
+                                mode='lines+markers',
+                                name='跌停数',
+                                line=dict(color='#27ae60', width=2),
+                                marker=dict(size=4)
+                            ))
+                            fig_limit.update_layout(
+                                title='涨停数 vs 跌停数',
+                                xaxis_title='日期',
+                                yaxis_title='数量',
+                                height=300,
+                                hovermode='x unified',
+                                legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
+                            )
+                            st.plotly_chart(fig_limit, use_container_width=True)
+                    with second_row[2]:
+                        if gem_pe_series is not None and not gem_pe_series.empty:
+                            gem_pe_series = gem_pe_series.sort_values('date')
+                            fig_gem_pe = go.Figure()
+                            fig_gem_pe.add_trace(go.Scatter(
+                                x=gem_pe_series['date'],
+                                y=gem_pe_series['市盈率'],
+                                mode='lines+markers',
+                                name='创业板市盈率',
+                                line=dict(color='#1f77b4', width=2),
+                                marker=dict(size=4),
+                                hovertemplate='%{x|%Y-%m-%d}<br>PE: %{y:.2f}<extra></extra>'
+                            ))
+                            fig_gem_pe.update_layout(
+                                title='创业板市盈率（近500交易日）',
+                                xaxis_title='日期',
+                                yaxis_title='PE',
+                                height=300,
+                                hovermode='x unified'
+                            )
+                            st.plotly_chart(fig_gem_pe, use_container_width=True)
+                        else:
+                            st.info("暂无创业板市盈率数据")
+            except Exception as e:
+                st.warning(f"读取历史市场数据失败: {e}")
 
         st.markdown("---")
 
     if _show("top100"):
-        _section_title("市场全貌分析")
-        top_100_records = review_data.get('top_100_turnover', [])
-        market_overview = review_data.get('market_overview', {})
-        range_distribution = market_overview.get('range_distribution', [])
+        _section_title("\u5e02\u573a\u5168\u8c8c\u5206\u6790")
+
+        # 保留原有2张图：当日涨跌幅分布 + 成交额Top100涨跌分布
+        top_100_records = review_data.get("top_100_turnover", [])
+        market_overview = review_data.get("market_overview", {})
+        range_distribution = market_overview.get("range_distribution", [])
 
         top_100_by_turnover = pd.DataFrame(top_100_records) if top_100_records else pd.DataFrame()
-        if not top_100_by_turnover.empty:
-            top_100_by_turnover['pct'] = pd.to_numeric(top_100_by_turnover['pct'], errors='coerce')
-            up_stocks = top_100_by_turnover[top_100_by_turnover['pct'] > 2]
-            down_stocks = top_100_by_turnover[top_100_by_turnover['pct'] < -2]
-            shake_stocks = top_100_by_turnover[(top_100_by_turnover['pct'] >= -2) & (top_100_by_turnover['pct'] <= 2)]
+        if not top_100_by_turnover.empty and "pct" in top_100_by_turnover.columns:
+            top_100_by_turnover["pct"] = pd.to_numeric(top_100_by_turnover["pct"], errors="coerce")
+            up_stocks = top_100_by_turnover[top_100_by_turnover["pct"] > 2]
+            down_stocks = top_100_by_turnover[top_100_by_turnover["pct"] < -2]
+            shake_stocks = top_100_by_turnover[
+                (top_100_by_turnover["pct"] >= -2) & (top_100_by_turnover["pct"] <= 2)
+            ]
             shake_count = len(shake_stocks)
         else:
             up_stocks = pd.DataFrame()
@@ -994,326 +1075,174 @@ def display_review_data(review_data, show_modules=None):
                 if not dist_df.empty:
                     order_labels = [">20%", "10%~20%", "5%~10%", "3%~5%", "0%~3%", "-3%~0%", "-5%~-3%", "-10%~-5%", "<-10%"]
                     order_map = {label: idx for idx, label in enumerate(order_labels)}
-                    dist_df['order'] = dist_df['label'].map(order_map)
-                    dist_df = dist_df.sort_values('order')
-                    colors = ['#e74c3c' if row['bucket_start'] >= 0 else '#2ecc71' for _, row in dist_df.iterrows()]
+                    dist_df["order"] = dist_df["label"].map(order_map)
+                    dist_df = dist_df.sort_values("order")
+                    colors = ["#e74c3c" if row["bucket_start"] >= 0 else "#2ecc71" for _, row in dist_df.iterrows()]
                     fig_range = go.Figure(go.Bar(
-                        x=dist_df['label'],
-                        y=dist_df['count'],
-                        text=dist_df['count'],
-                        textposition='outside',
+                        x=dist_df["label"],
+                        y=dist_df["count"],
+                        text=dist_df["count"],
+                        textposition="outside",
                         marker_color=colors,
-                        hovertemplate='%{x}<br>家数: %{y}<extra></extra>'
+                        hovertemplate="%{x}<br>\u5bb6\u6570: %{y}<extra></extra>",
                     ))
                     fig_range.update_layout(
-                        title='当日涨跌幅分布',
-                        xaxis_title='涨跌幅区间(%)',
-                        yaxis_title='家数',
+                        title="\u5f53\u65e5\u6da8\u8dcc\u5e45\u5206\u5e03",
+                        xaxis_title="\u6da8\u8dcc\u5e45\u533a\u95f4(%)",
+                        yaxis_title="\u5bb6\u6570",
                         height=400,
-                        margin=dict(t=30, l=10, r=10, b=40)
+                        margin=dict(t=30, l=10, r=10, b=40),
                     )
                     st.plotly_chart(fig_range, use_container_width=True)
                 else:
-                    st.info("暂无涨跌幅分布数据")
+                    st.info("\u6682\u65e0\u6da8\u8dcc\u5e45\u5206\u5e03\u6570\u636e")
             else:
-                st.info("暂无涨跌幅分布数据")
+                st.info("\u6682\u65e0\u6da8\u8dcc\u5e45\u5206\u5e03\u6570\u636e")
+
         with overview_cols[1]:
             if top_100_by_turnover.empty:
-                st.info("暂无TOP100数据")
+                st.info("\u6682\u65e0TOP100\u6570\u636e")
             else:
-                categories = ['小涨(2-5%)', '中涨(5-9%)', '大涨(>9%)',
-                            '小跌(-2~-5%)', '中跌(-5~-9%)', '大跌(<-9%)',
-                            '震荡(-2%~2%)']
-                small_up = up_stocks[(up_stocks['pct'] >= 2) & (up_stocks['pct'] < 5)]
-                medium_up = up_stocks[(up_stocks['pct'] >= 5) & (up_stocks['pct'] < 9)]
-                large_up = up_stocks[up_stocks['pct'] >= 9]
-                small_down = down_stocks[(down_stocks['pct'] <= -2) & (down_stocks['pct'] > -5)]
-                medium_down = down_stocks[(down_stocks['pct'] <= -5) & (down_stocks['pct'] > -9)]
-                large_down = down_stocks[down_stocks['pct'] <= -9]
+                categories = [
+                    "\u5c0f\u6da8(2-5%)", "\u4e2d\u6da8(5-9%)", "\u5927\u6da8(>9%)",
+                    "\u5c0f\u8dcc(-2~-5%)", "\u4e2d\u8dcc(-5~-9%)", "\u5927\u8dcc(<-9%)",
+                    "\u9707\u8361(-2%~2%)",
+                ]
+                small_up = up_stocks[(up_stocks["pct"] >= 2) & (up_stocks["pct"] < 5)]
+                medium_up = up_stocks[(up_stocks["pct"] >= 5) & (up_stocks["pct"] < 9)]
+                large_up = up_stocks[up_stocks["pct"] >= 9]
+                small_down = down_stocks[(down_stocks["pct"] <= -2) & (down_stocks["pct"] > -5)]
+                medium_down = down_stocks[(down_stocks["pct"] <= -5) & (down_stocks["pct"] > -9)]
+                large_down = down_stocks[down_stocks["pct"] <= -9]
                 values = [
-                    len(small_up),
-                    len(medium_up),
-                    len(large_up),
-                    len(small_down),
-                    len(medium_down),
-                    len(large_down),
+                    len(small_up), len(medium_up), len(large_up),
+                    len(small_down), len(medium_down), len(large_down),
                     shake_count,
                 ]
-                colors = ['#c0392b', '#a93226', '#922b21',
-                        '#27ae60', '#229954', '#1e8449',
-                        '#f39c12']
-                fig_bar = go.Figure()
-                fig_bar.add_trace(go.Bar(
+                colors = ["#c0392b", "#a93226", "#922b21", "#27ae60", "#229954", "#1e8449", "#f39c12"]
+                fig_bar = go.Figure(go.Bar(
                     x=categories,
                     y=values,
                     marker_color=colors,
                     text=values,
-                    textposition='outside',
-                    hovertemplate='<b>%{x}</b><br>数量: %{y}只<extra></extra>'
+                    textposition="outside",
+                    hovertemplate="<b>%{x}</b><br>\u6570\u91cf: %{y}<extra></extra>",
                 ))
                 fig_bar.update_layout(
-                    title='成交额100涨幅分布',
-                    xaxis_title='分类',
-                    yaxis_title='股票数量',
+                    title="\u6210\u4ea4\u989dTop100\u6da8\u8dcc\u5206\u5e03",
+                    xaxis_title="\u5206\u7c7b",
+                    yaxis_title="\u80a1\u7968\u6570\u91cf",
                     height=400,
                     xaxis=dict(tickangle=-45),
-                    yaxis=dict(range=[0, max(values) * 1.2] if values else [0, 10])
+                    yaxis=dict(range=[0, max(values) * 1.2] if values else [0, 10]),
                 )
                 st.plotly_chart(fig_bar, use_container_width=True)
 
-        top_100_gainers = review_data.get('top_100_gainers', [])
-        top_100_losers = review_data.get('top_100_losers', [])
+        top_100_gainers_records = review_data.get("top_100_gainers", [])
+        gainers_df = pd.DataFrame(top_100_gainers_records) if top_100_gainers_records else pd.DataFrame()
 
-        if top_100_gainers:
-            payload_str = json.dumps({'top_100_gainers': top_100_gainers}, ensure_ascii=False)
-            profit_summary = llm_summarize('profit_effect', payload_str)
-            if profit_summary:
-                profit_parts = _split_summary_parts(profit_summary, expected=3)
-                _render_three_blocks(
-                    "赚钱效应",
-                    ["强势风格/方向", "涨幅集中度", "情绪温度与持续性"],
-                    profit_parts,
-                    tone="profit"
-                )
+        if gainers_df.empty:
+            st.info("\u6682\u65e0\u6da8\u5e45Top100\u6570\u636e")
         else:
-            st.info("暂无涨幅Top100数据")
+            for col in ["pct", "amount", "mkt_cap"]:
+                if col in gainers_df.columns:
+                    gainers_df[col] = pd.to_numeric(gainers_df[col], errors="coerce")
+            gainers_df = gainers_df.dropna(subset=[c for c in ["code", "name", "pct"] if c in gainers_df.columns])
+            gainers_df = gainers_df.sort_values("pct", ascending=False).head(100)
 
-        if top_100_losers:
-            payload_str = json.dumps({'top_100_losers': top_100_losers}, ensure_ascii=False)
-            loss_summary = llm_summarize('loss_effect', payload_str)
-            if loss_summary:
-                loss_parts = _split_summary_parts(loss_summary, expected=3)
-                _render_three_blocks(
-                    "亏钱效应",
-                    ["弱势风格/方向", "跌幅集中度", "风险偏好与恐慌程度"],
-                    loss_parts,
-                    tone="loss"
-                )
-        else:
-            st.info("暂无跌幅Top100数据")
+            if gainers_df.empty:
+                st.info("\u6682\u65e0\u6ee1\u8db3\u6761\u4ef6\u7684\u6da8\u5e45Top100\u6570\u636e")
+            else:
+                amount_yi = (gainers_df["amount"] / 1e8) if "amount" in gainers_df.columns else pd.Series(dtype=float)
+                mkt_cap_yi = (gainers_df["mkt_cap"] / 1e8) if "mkt_cap" in gainers_df.columns else pd.Series(dtype=float)
+
+                amount_labels = ["<5\u4ebf", "5-50\u4ebf", "50-90\u4ebf", ">90\u4ebf"]
+                amount_values = [
+                    int((amount_yi < 5).sum()) if not amount_yi.empty else 0,
+                    int(((amount_yi >= 5) & (amount_yi < 50)).sum()) if not amount_yi.empty else 0,
+                    int(((amount_yi >= 50) & (amount_yi < 90)).sum()) if not amount_yi.empty else 0,
+                    int((amount_yi >= 90).sum()) if not amount_yi.empty else 0,
+                ]
+
+                mkt_labels = ["<50\u4ebf", "50-100\u4ebf", "100-200\u4ebf", "200-500\u4ebf", ">500\u4ebf"]
+                mkt_values = [
+                    int((mkt_cap_yi < 50).sum()) if not mkt_cap_yi.empty else 0,
+                    int(((mkt_cap_yi >= 50) & (mkt_cap_yi < 100)).sum()) if not mkt_cap_yi.empty else 0,
+                    int(((mkt_cap_yi >= 100) & (mkt_cap_yi < 200)).sum()) if not mkt_cap_yi.empty else 0,
+                    int(((mkt_cap_yi >= 200) & (mkt_cap_yi < 500)).sum()) if not mkt_cap_yi.empty else 0,
+                    int((mkt_cap_yi >= 500).sum()) if not mkt_cap_yi.empty else 0,
+                ]
+
+                code_series = gainers_df["code"].astype(str).str.lower().str.strip()
+                code6 = code_series.str.extract(r"(\d{6})", expand=False).fillna("")
+                kcb_mask = code6.str.startswith("688")
+                cyb_mask = code6.str.startswith(("300", "301"))
+
+                board_labels = [
+                    "\u4e3b\u677f\uff08\u4e0a\u8bc1+\u6df1\u5733\uff09",
+                    "\u521b\u4e1a\u677f",
+                    "\u79d1\u521b\u677f",
+                ]
+                board_values = [
+                    int((~kcb_mask & ~cyb_mask).sum()),
+                    int(cyb_mask.sum()),
+                    int(kcb_mask.sum()),
+                ]
+
+                row_cols = st.columns(3)
+
+                with row_cols[0]:
+                    fig_amount = go.Figure(go.Bar(
+                        x=amount_labels,
+                        y=amount_values,
+                        marker_color=["#9b59b6", "#3498db", "#f39c12", "#e74c3c"],
+                        text=amount_values,
+                        textposition="outside",
+                        hovertemplate="%{x}<br>\u6570\u91cf: %{y}<extra></extra>",
+                    ))
+                    fig_amount.update_layout(
+                        title="\u6210\u4ea4\u989d\u5206\u5c42\uff08\u6da8\u5e45Top100\uff09",
+                        xaxis_title="\u6210\u4ea4\u989d\u533a\u95f4\uff08\u4ebf\u5143\uff09",
+                        yaxis_title="\u80a1\u7968\u6570\u91cf",
+                        height=350,
+                    )
+                    st.plotly_chart(fig_amount, use_container_width=True)
+
+                with row_cols[1]:
+                    fig_mkt = go.Figure(go.Bar(
+                        x=mkt_labels,
+                        y=mkt_values,
+                        marker_color=["#16a085", "#1abc9c", "#27ae60", "#2ecc71", "#58d68d"],
+                        text=mkt_values,
+                        textposition="outside",
+                        hovertemplate="%{x}<br>\u6570\u91cf: %{y}<extra></extra>",
+                    ))
+                    fig_mkt.update_layout(
+                        title="\u5e02\u503c\u5206\u5c42\uff08\u6da8\u5e45Top100\uff09",
+                        xaxis_title="\u5e02\u503c\u533a\u95f4\uff08\u4ebf\u5143\uff09",
+                        yaxis_title="\u80a1\u7968\u6570\u91cf",
+                        height=350,
+                    )
+                    st.plotly_chart(fig_mkt, use_container_width=True)
+
+                with row_cols[2]:
+                    fig_board = go.Figure(go.Bar(
+                        x=board_labels,
+                        y=board_values,
+                        marker_color=["#2f80ed", "#f2994a", "#eb5757"],
+                        text=board_values,
+                        textposition="outside",
+                        hovertemplate="%{x}<br>\u6570\u91cf: %{y}<extra></extra>",
+                    ))
+                    fig_board.update_layout(
+                        title="\u677f\u5757\u5206\u7c7b\uff08\u6da8\u5e45Top100\uff09",
+                        xaxis_title="\u677f\u5757",
+                        yaxis_title="\u80a1\u7968\u6570\u91cf",
+                        height=350,
+                    )
+                    st.plotly_chart(fig_board, use_container_width=True)
 
         st.markdown("---")
-
-    if _show("short"):
-        _section_title("短线效应")
-        st.markdown("#### 游资龙虎榜")
-        try:
-            lh_yz_df = get_longhu_data(zt_date)
-        except Exception as exc:
-            st.warning(f"获取游资龙虎榜失败: {exc}")
-            lh_yz_df = pd.DataFrame()
-
-        if lh_yz_df is None or lh_yz_df.empty:
-            st.info("暂无游资龙虎榜数据")
-        else:
-            net_col = None
-            for candidate in ['净买入', '净买入额', '净买入金额']:
-                if candidate in lh_yz_df.columns:
-                    net_col = candidate
-                    break
-            if net_col is None and {'买入金额', '卖出金额'}.issubset(lh_yz_df.columns):
-                lh_yz_df['净买入'] = lh_yz_df['买入金额'] - lh_yz_df['卖出金额']
-                net_col = '净买入'
-
-            if net_col is None:
-                st.info("游资龙虎榜缺少净买入字段，无法排序")
-            else:
-                def _format_amount(value):
-                    if value is None or (isinstance(value, float) and pd.isna(value)):
-                        return ""
-                    try:
-                        amount = float(value)
-                    except Exception:
-                        return ""
-                    if abs(amount) >= 1e8:
-                        return f"{amount / 1e8:.2f}亿元"
-                    return f"{amount / 1e4:.0f}万"
-
-                view_df = lh_yz_df.copy()
-                view_df['净买入金额'] = view_df[net_col].clip(lower=0)
-                view_df['净卖出金额'] = (-view_df[net_col]).clip(lower=0)
-
-                buy_df = view_df.sort_values('净买入金额', ascending=False)
-                sell_df = view_df.sort_values('净卖出金额', ascending=False)
-
-                for col in ['净买入金额', '净卖出金额']:
-                    view_df[col] = view_df[col].apply(_format_amount)
-                    buy_df[col] = buy_df[col].apply(_format_amount)
-                    sell_df[col] = sell_df[col].apply(_format_amount)
-
-                buy_cols = [col for col in ['游资', '买入股票', '净买入金额'] if col in view_df.columns]
-                sell_cols = [col for col in ['游资', '买入股票', '净卖出金额'] if col in view_df.columns]
-                if not buy_cols:
-                    buy_cols = list(view_df.columns)
-                if not sell_cols:
-                    sell_cols = list(view_df.columns)
-                col_buy, col_sell = st.columns(2)
-                with col_buy:
-                    st.markdown("**净买入排序**")
-                    st.dataframe(
-                        buy_df[buy_cols].reset_index(drop=True),
-                        hide_index=True,
-                        use_container_width=True
-                    )
-                with col_sell:
-                    st.markdown("**净卖出排序**")
-                    st.dataframe(
-                        sell_df[sell_cols].reset_index(drop=True),
-                        hide_index=True,
-                        use_container_width=True
-                    )
-
-        st.markdown("#### 短线连板梯队")
-        zt_pool = get_zt_pool(zt_date)
-        dt_pool_error = False
-        try:
-            dt_pool = get_dt_pool(zt_date)
-        except Exception as exc:
-            st.warning(f"获取跌停股池失败: {exc}")
-            dt_pool_error = True
-            dt_pool = pd.DataFrame()
-        dt_tier_df, dt_tier_counts = _build_dt_tiers(dt_pool)
-
-        tier_df = pd.DataFrame()
-        tier_counts = pd.DataFrame()
-        total_zt = 0
-        broken_count = None
-        break_rate = None
-        max_streak = None
-        streak_stock_count = None
-
-        if zt_pool is None or zt_pool.empty:
-            st.info("暂无涨停池数据")
-        else:
-            keep_cols = ['代码', '名称', '涨跌幅', '成交额', '总市值', '首次封板时间', '炸板次数', '连板数']
-            existing_cols = [col for col in keep_cols if col in zt_pool.columns]
-            if existing_cols:
-                zt_pool = zt_pool[existing_cols].copy()
-            if '首次封板时间' in zt_pool.columns:
-                zt_pool = zt_pool.sort_values(by='首次封板时间')
-
-            total_zt = len(zt_pool)
-            if '炸板次数' in zt_pool.columns:
-                broken_count = (pd.to_numeric(zt_pool['炸板次数'], errors='coerce').fillna(0) > 0).sum()
-                break_rate = broken_count / total_zt if total_zt > 0 else None
-
-            tier_df, tier_counts = _build_zt_tiers(zt_pool)
-            if not tier_df.empty and '连板' in tier_df.columns:
-                max_streak = int(tier_df['连板'].max())
-                streak_stock_count = int((tier_df['连板'] >= 2).sum())
-
-            metric_cols = st.columns(4)
-            with metric_cols[0]:
-                st.metric("连板股家数", streak_stock_count if streak_stock_count is not None else 0)
-            with metric_cols[1]:
-                st.metric("连板高度", max_streak if max_streak is not None else 0)
-            with metric_cols[2]:
-                rate_text = f"{break_rate * 100:.1f}%" if break_rate is not None else "—"
-                st.metric("涨停炸板率", rate_text)
-            with metric_cols[3]:
-                st.metric("炸板家数", broken_count if broken_count is not None else 0)
-
-            chart_cols = st.columns(2)
-            with chart_cols[0]:
-                if tier_counts.empty or '连板' not in tier_counts.columns:
-                    st.info("暂无连板统计数据")
-                else:
-                    chart_df = tier_counts[['连板', '数量']].copy()
-                    chart_df['连板'] = pd.to_numeric(chart_df['连板'], errors='coerce')
-                    chart_df['数量'] = pd.to_numeric(chart_df['数量'], errors='coerce')
-                    chart_df = chart_df.dropna(subset=['连板', '数量']).sort_values('连板')
-                    if chart_df.empty:
-                        st.info("暂无连板统计数据")
-                    else:
-                        fig_tier = go.Figure(go.Bar(
-                            x=chart_df['连板'].astype(int).astype(str) + "板",
-                            y=chart_df['数量'],
-                            text=chart_df['数量'],
-                            textposition='outside',
-                            marker_color='#4f7cff',
-                            hovertemplate='连板: %{x}<br>数量: %{y}<extra></extra>'
-                        ))
-                        fig_tier.update_layout(
-                            title='连板高度-家数分布',
-                            xaxis_title='连板高度',
-                            yaxis_title='家数',
-                            height=320,
-                            margin=dict(t=40, l=10, r=10, b=40)
-                        )
-                        st.plotly_chart(fig_tier, use_container_width=True)
-            with chart_cols[1]:
-                if dt_pool_error:
-                    st.info("暂无跌停股池数据")
-                elif dt_tier_counts.empty or '连续跌停' not in dt_tier_counts.columns:
-                    st.info("暂无跌停统计数据")
-                else:
-                    dt_chart = dt_tier_counts[['连续跌停', '数量']].copy()
-                    dt_chart['连续跌停'] = pd.to_numeric(dt_chart['连续跌停'], errors='coerce')
-                    dt_chart['数量'] = pd.to_numeric(dt_chart['数量'], errors='coerce')
-                    dt_chart = dt_chart.dropna(subset=['连续跌停', '数量']).sort_values('连续跌停')
-                    if dt_chart.empty:
-                        st.info("暂无跌停统计数据")
-                    else:
-                        fig_dt = go.Figure(go.Bar(
-                            x=dt_chart['连续跌停'].astype(int).astype(str) + "板",
-                            y=dt_chart['数量'],
-                            text=dt_chart['数量'],
-                            textposition='outside',
-                            marker_color='#2ecc71',
-                            hovertemplate='连续跌停: %{x}<br>数量: %{y}<extra></extra>'
-                        ))
-                        fig_dt.update_layout(
-                            title='连续跌停高度-家数分布',
-                            xaxis_title='连续跌停高度',
-                            yaxis_title='家数',
-                            height=320,
-                            margin=dict(t=40, l=10, r=10, b=40)
-                        )
-                        st.plotly_chart(fig_dt, use_container_width=True)
-
-            detail_cols = st.columns(2)
-            with detail_cols[0]:
-                if tier_counts.empty:
-                    st.info("暂无连板明细数据")
-                else:
-                    grouped = []
-                    for streak, group in tier_df.groupby('连板'):
-                        if '名称' in group.columns and '代码' in group.columns:
-                            names = '、'.join(
-                                [f"{n}({c})" for n, c in zip(group['名称'], group['代码'])]
-                            )
-                        elif '名称' in group.columns:
-                            names = '、'.join(group['名称'].astype(str))
-                        elif '代码' in group.columns:
-                            names = '、'.join(group['代码'].astype(str))
-                        else:
-                            names = ''
-                        grouped.append({'连板': streak, '数量': len(group), '个股': names})
-                    tier_detail = pd.DataFrame(grouped).sort_values('连板', ascending=False)
-                    st.dataframe(tier_detail, use_container_width=True, hide_index=True)
-            with detail_cols[1]:
-                if dt_pool_error:
-                    st.info("暂无跌停股池数据")
-                elif dt_tier_counts.empty:
-                    st.info("暂无跌停明细数据")
-                else:
-                    dt_grouped = []
-                    for streak, group in dt_tier_df.groupby('连续跌停'):
-                        if '名称' in group.columns and '代码' in group.columns:
-                            names = '、'.join(
-                                [f"{n}({c})" for n, c in zip(group['名称'], group['代码'])]
-                            )
-                        elif '名称' in group.columns:
-                            names = '、'.join(group['名称'].astype(str))
-                        elif '代码' in group.columns:
-                            names = '、'.join(group['代码'].astype(str))
-                        else:
-                            names = ''
-                        dt_grouped.append({'连续跌停': streak, '数量': len(group), '个股': names})
-                    dt_detail = pd.DataFrame(dt_grouped).sort_values('连续跌停', ascending=False)
-                    st.dataframe(dt_detail, use_container_width=True, hide_index=True)
-
-        # AI 总结已移除
 
 
 
@@ -1329,30 +1258,39 @@ st.markdown("#### 复盘模块显示")
 show_external = st.checkbox("\u5916\u56f4\u6307\u6807", value=True, key="show_external")
 show_market = st.checkbox("今日大盘", value=True, key="show_market")
 show_top100 = st.checkbox("市场全貌分析", value=True, key="show_top100")
-show_short = st.checkbox("短线效应", value=True, key="show_short")
 show_modules = {
     "external": show_external,
     "market": show_market,
     "top100": show_top100,
-    "short": show_short,
 }
-load_btn = st.button('Load')
+btn_cols = st.columns(2)
+with btn_cols[0]:
+    load_btn = st.button("Load")
+with btn_cols[1]:
+    realtime_load_btn = st.button("实时Load")
 
-if load_btn:
-    if select_date.weekday() >= 5:
+if load_btn or realtime_load_btn:
+    if select_date.weekday() >= 5: 
         st.warning("非交易日")
         st.stop()
-
-    date_str = select_date.strftime('%Y-%m-%d')
-    cached_data = load_review_data(date_str)
-    if cached_data:
-        st.info(f"优先加载数据库复盘数据: {date_str}")
-        display_review_data(cached_data, show_modules)
-    else:
+    
+    # date_str = select_date.strftime('%Y-%m-%d')
+    # cached_data = load_review_data(date_str)
+    # if cached_data:
+    #     st.info(f"使用已缓存复盘数据: {date_str}")
+    #     display_review_data(cached_data)
+    # else:
+    if realtime_load_btn:
         review_data = build_review_data(select_date, show_modules)
-        if is_review_data_complete(review_data):
-            save_review_data(date_str, review_data)
-            st.success(f"当日数据不存在，已抓取并写入数据库: {date_str}")
-        else:
-            st.warning("抓取完成但数据完整性不足，未写入数据库")
-        display_review_data(review_data, show_modules)
+        st.info("已按实时方案取数")
+    else:
+        review_data = build_review_data_from_mysql(select_date, show_modules)
+        st.info("已按MySQL持久化数据取数（K线实时）")
+        if show_modules.get("top100", True) and not review_data.get("top_100_turnover"):
+            st.warning("MySQL中未命中TOP100分组数据，可点击“实时Load”兜底。")
+    #     if is_review_data_complete(review_data):
+    #         save_review_data(date_str, review_data)
+    #         st.success(f"复盘数据已保存: {date_str}")
+    #     else:
+    #         st.warning("复盘数据不完整，未写入缓存")
+    display_review_data(review_data, show_modules)
