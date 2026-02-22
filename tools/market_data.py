@@ -393,6 +393,82 @@ def get_market_data():
     return sh_df, cyb_df, kcb_df, market_data
 
 
+@st.cache_data(ttl='30m')
+def get_market_history(days: int = 30) -> pd.DataFrame:
+    """
+    获取市场历史数据。
+    优先从 MySQL market_activity_daily 读取，失败时回退本地 datas/market_data.csv。
+    返回列：日期、上涨、下跌、涨停、跌停、活跃度、成交额
+    """
+    safe_days = max(1, int(days))
+
+    # 1) 优先从 MySQL 读取
+    try:
+        from database.db_manager import get_db
+
+        with get_db() as db:
+            rows = db.query(
+                f"""
+                SELECT
+                    trade_date AS 日期,
+                    up_count AS 上涨,
+                    down_count AS 下跌,
+                    zt_count AS 涨停,
+                    dt_count AS 跌停,
+                    activity_index AS 活跃度,
+                    total_amount AS 成交额
+                FROM market_activity_daily
+                ORDER BY trade_date DESC
+                LIMIT {safe_days}
+                """
+            )
+
+        if rows:
+            df = pd.DataFrame(rows)
+            if not df.empty:
+                df["日期"] = pd.to_datetime(df["日期"], errors="coerce")
+                df = df.dropna(subset=["日期"]).sort_values("日期").tail(safe_days)
+                for col in ["上涨", "下跌", "涨停", "跌停", "活跃度", "成交额"]:
+                    if col in df.columns:
+                        df[col] = pd.to_numeric(df[col], errors="coerce")
+                return df
+    except Exception:
+        pass
+
+    # 2) 回退 CSV
+    try:
+        csv_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'datas', 'market_data.csv')
+        if not os.path.exists(csv_file):
+            return pd.DataFrame()
+
+        df = pd.read_csv(csv_file)
+        if df is None or df.empty:
+            return pd.DataFrame()
+
+        # 兼容列名乱码或不同版本：按列序做兜底映射
+        cols = list(df.columns)
+        if len(cols) < 13:
+            return pd.DataFrame()
+
+        out = pd.DataFrame()
+        out["日期"] = df[cols[0]]
+        out["上涨"] = df[cols[1]]
+        out["涨停"] = df[cols[2]]
+        out["下跌"] = df[cols[5]]
+        out["跌停"] = df[cols[6]]
+        out["活跃度"] = df[cols[11]]
+        out["成交额"] = df[cols[12]]
+
+        out["日期"] = pd.to_datetime(out["日期"], errors="coerce")
+        out = out.dropna(subset=["日期"]).sort_values("日期").tail(safe_days)
+        for col in ["上涨", "下跌", "涨停", "跌停", "成交额"]:
+            out[col] = pd.to_numeric(out[col], errors="coerce")
+        out["活跃度"] = pd.to_numeric(out["活跃度"].astype(str).str.replace("%", "", regex=False), errors="coerce")
+        return out
+    except Exception:
+        return pd.DataFrame()
+
+
 @st.cache_data(ttl='1d')
 def get_all_stocks(base_date=None):
     if base_date is None:
