@@ -640,57 +640,95 @@ class TradeDayUpdater:
     def update_market_activity(self, date: str) -> bool:
         """
         更新市场活跃度数据
-        使用akshare的stock_market_activity_legu方法
+        使用 Tushare daily 接口获取全市场成交额（沪深创合并口径）
         """
         logger.info(f"开始更新市场活跃度: {date}")
-        
+
         try:
-            # 获取市场活跃度数据
-            df = ak.stock_market_activity_legu()
-            
-            if df is not None and not df.empty:
-                # 提取数据
-                up_count = int(df[df['item'] == '上涨家数']['value'].values[0]) if '上涨家数' in df['item'].values else 0
-                down_count = int(df[df['item'] == '下跌家数']['value'].values[0]) if '下跌家数' in df['item'].values else 0
-                
-                # 获取涨停跌停数量
+            # 1. 从 akshare 获取涨跌家数、涨停跌停数（这些字段没问题）
+            up_count, down_count, zt_count, dt_count = 0, 0, 0, 0
+            try:
+                df_legu = ak.stock_market_activity_legu()
+                if df_legu is not None and not df_legu.empty:
+                    up_count = int(df_legu[df_legu['item'] == '上涨家数']['value'].values[0]) if '上涨家数' in df_legu['item'].values else 0
+                    down_count = int(df_legu[df_legu['item'] == '下跌家数']['value'].values[0]) if '下跌家数' in df_legu['item'].values else 0
+            except Exception as e:
+                logger.warning(f"akshare 市场活跃度获取失败（将尝试 Tushare 兜底）: {e}")
+
+            # 2. 从 akshare 获取涨停跌停数
+            try:
+                zt_df = ak.stock_zt_pool_em(date=date)
+                zt_count = len(zt_df) if zt_df is not None else 0
+            except:
+                zt_count = 0
+
+            try:
+                dt_df = ak.stock_zt_pool_dtgc_em(date=date)
+                dt_count = len(dt_df) if dt_df is not None else 0
+            except:
+                dt_count = 0
+
+            # 3. 使用 Tushare daily 接口获取全市场成交额（沪深创合并）
+            # 口径：沪市 + 深市 + 创业板，单位：千元 -> 转为元后 / 1e8 = 亿元
+            total_amount = 0.0
+            if self.ts_pro:
                 try:
-                    zt_df = ak.stock_zt_pool_em(date=date)
-                    zt_count = len(zt_df) if zt_df is not None else 0
-                except:
-                    zt_count = 0
-                
+                    daily_df = self.ts_pro.daily(trade_date=date, fields="ts_code,trade_date,amount")
+                    if daily_df is not None and not daily_df.empty and "amount" in daily_df.columns:
+                        # amount 单位是千元，求和后转为亿元
+                        total_amount_k = pd.to_numeric(daily_df["amount"], errors="coerce").sum()
+                        total_amount = float(total_amount_k) * 1000.0 / 1e8  # 千元 -> 元 -> 亿元
+                        logger.info(f"全市场成交额（沪深创合并）: {total_amount:.2f} 亿元")
+                except Exception as e:
+                    logger.error(f"Tushare daily 接口获取成交额失败: {e}")
+
+            # 4. 如果 Tushare 获取失败，尝试从指数数据反推（兜底）
+            if total_amount <= 0:
                 try:
-                    dt_df = ak.stock_zt_pool_dtgc_em(date=date)
-                    dt_count = len(dt_df) if dt_df is not None else 0
-                except:
-                    dt_count = 0
-                
-                # 计算活跃度指数 (0-100)
-                total = up_count + down_count
-                activity_index = (up_count / total * 100) if total > 0 else 50
-                
-                # 获取总成交额
-                total_amount = float(df[df['item'] == '总成交额']['value'].values[0]) if '总成交额' in df['item'].values else 0
-                
-                data = {
-                    'trade_date': date,
+                    index_amounts = []
+                    for idx_code in ["000001.SH", "399006.SZ", "399001.SZ"]:
+                        idx_df = self.ts_pro.index_daily(ts_code=idx_code, trade_date=date, fields="ts_code,amount")
+                        if idx_df is not None and not idx_df.empty and "amount" in idx_df.columns:
+                            idx_amount = pd.to_numeric(idx_df["amount"], errors="coerce").sum()
+                            index_amounts.append(float(idx_amount))
+                    if index_amounts:
+                        # 指数 amount 单位也是千元
+                        total_amount = sum(index_amounts) * 1000.0 / 1e8
+                        logger.info(f"全市场成交额（指数口径兜底）: {total_amount:.2f} 亿元")
+                except Exception as e:
+                    logger.error(f"指数成交额兜底获取失败: {e}")
+
+            # 5. 计算活跃度指数 (0-100)
+            total = up_count + down_count
+            activity_index = (up_count / total * 100) if total > 0 else 50
+
+            data = {
+                'trade_date': date,
+                'up_count': up_count,
+                'down_count': down_count,
+                'zt_count': zt_count,
+                'dt_count': dt_count,
+                'activity_index': activity_index,
+                'total_amount': total_amount,  # 单位：亿元
+                'raw_payload': safe_json_dumps({
                     'up_count': up_count,
                     'down_count': down_count,
                     'zt_count': zt_count,
                     'dt_count': dt_count,
-                    'activity_index': activity_index,
-                    'total_amount': total_amount,
-                    'raw_payload': safe_json_dumps(df.to_dict()),
-                }
-                
-                self.db.upsert('market_activity_daily', data, ['trade_date'])
-                logger.info(f"✓ 市场活跃度更新成功: 涨{up_count}/跌{down_count}/涨停{zt_count}/跌停{dt_count}")
-                return True
-                
+                    'total_amount_yi': total_amount,
+                    'source': 'tushare_daily' if total_amount > 0 else 'fallback',
+                }),
+            }
+
+            self.db.upsert('market_activity_daily', data, ['trade_date'])
+            logger.info(f"✓ 市场活跃度更新成功: 涨{up_count}/跌{down_count}/涨停{zt_count}/跌停{dt_count}/成交额{total_amount:.2f}亿")
+            return True
+
         except Exception as e:
             logger.error(f"市场活跃度更新失败: {e}")
-        
+            import traceback
+            traceback.print_exc()
+
         return False
     
     # ==================== 4. 全市场股票指标获取 ====================

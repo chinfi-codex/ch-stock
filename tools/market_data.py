@@ -267,6 +267,32 @@ def get_gem_pe_series(days: int = 500) -> pd.DataFrame:
 
 
 @st.cache_data(ttl='1d')
+def _get_tushare_token():
+    """获取 Tushare token：环境变量优先，其次尝试 workspace/.env。"""
+    token = (os.environ.get("TUSHARE_TOKEN") or "").strip()
+    if token:
+        return token
+
+    # 兼容定时任务未 source .env 的场景
+    try:
+        env_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".env"))
+        if os.path.exists(env_path):
+            with open(env_path, "r", encoding="utf-8") as f:
+                for line in f:
+                    s = line.strip()
+                    if not s or s.startswith("#") or "=" not in s:
+                        continue
+                    k, v = s.split("=", 1)
+                    if k.strip() == "TUSHARE_TOKEN":
+                        token = v.strip().strip('"').strip("'")
+                        if token:
+                            return token
+    except Exception:
+        pass
+
+    return ""
+
+
 def get_market_data():
     """获取大盘数据：上证K，上涨家数、下跌家数、情绪指数"""
     def _fetch_index_kline(symbol: str, ts_code: str) -> pd.DataFrame:
@@ -335,14 +361,19 @@ def get_market_data():
     # 使用 Tushare 全市场成交额作为量能口径（单位：千元）
     total_amount = 0.0
     try:
-        token = st.secrets.get("tushare_token") or os.environ.get("TUSHARE_TOKEN")
+        token = _get_tushare_token()
         if token:
             pro = ts.pro_api(token)
             trade_date = pd.to_datetime(stat_date).strftime("%Y%m%d")
             daily = pro.daily(trade_date=trade_date, fields="ts_code,trade_date,amount")
             if daily is not None and not daily.empty and "amount" in daily.columns:
                 total_amount = pd.to_numeric(daily["amount"], errors="coerce").sum()
-    except Exception:
+            else:
+                print(f"Tushare daily 返回空数据: trade_date={trade_date}")
+        else:
+            print("未找到 TUSHARE_TOKEN，成交额将置为0")
+    except Exception as e:
+        print(f"获取成交额失败: {e}")
         total_amount = 0.0
 
     row['成交额'] = total_amount
