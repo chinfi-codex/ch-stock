@@ -485,6 +485,7 @@ class TradeDayUpdater:
             {'code': 'BTCUSD', 'name': 'BTC/USD', 'func': self._fetch_btc_usd},
             {'code': 'XAUUSD', 'name': 'XAU/USD', 'func': self._fetch_xau_usd},
             {'code': 'USDCNY', 'name': 'USD/CNY', 'func': self._fetch_usdcny},
+            {'code': 'WTI', 'name': 'WTI Crude Oil', 'func': self._fetch_wti},
             {'code': 'US10Y', 'name': 'US 10Y Treasury Yield', 'func': self._fetch_us10y},
         ]
 
@@ -591,6 +592,55 @@ class TradeDayUpdater:
 
     def _fetch_us10y(self, date: str) -> Optional[Dict]:
         return self._fetch_treasury_yield(date, maturity='10year')
+
+    def _fetch_wti(self, date: str) -> Optional[Dict]:
+        payload = self._alphavantage_get_json({
+            'function': 'WTI',
+            'interval': 'daily',
+        })
+        if not payload:
+            return None
+
+        data = payload.get('data')
+        if not isinstance(data, list) or not data:
+            return None
+
+        date_iso = self._date_to_iso(date)
+        today_row = None
+        prev_row = None
+
+        for row in data:
+            d = row.get('date')
+            if d == date_iso:
+                today_row = row
+                break
+        if not today_row:
+            for row in data:
+                d = row.get('date')
+                if d and d <= date_iso:
+                    today_row = row
+                    break
+        if not today_row:
+            today_row = data[-1]
+
+        target_date = today_row.get('date')
+        for row in data:
+            d = row.get('date')
+            if d and target_date and d < target_date:
+                prev_row = row
+                break
+
+        close_price = self._safe_float(today_row.get('value'))
+        prev_close = self._safe_float(prev_row.get('value')) if prev_row else None
+        pct_change = None
+        if close_price is not None and prev_close and prev_close != 0:
+            pct_change = (close_price - prev_close) / prev_close * 100
+
+        return {
+            'close_price': close_price,
+            'pct_change': pct_change,
+            'raw_payload': safe_json_dumps(today_row),
+        }
 
     def update_index_data(self, date: str) -> bool:
         """
@@ -753,8 +803,8 @@ class TradeDayUpdater:
 
             df_daily = self.ts_pro.daily(trade_date=date)
             if df_daily is not None and not df_daily.empty:
-                df_daily = df_daily[['ts_code', 'pct_chg', 'amount', 'vol', 'close']]
-                df = df_basic.merge(df_daily, on='ts_code', how='left')
+                df_daily = df_daily[['ts_code', 'pct_chg', 'amount', 'close']]
+                df = df_basic.merge(df_daily, on='ts_code', how='left', suffixes=('', '_daily'))
             else:
                 df = df_basic
 
@@ -767,20 +817,26 @@ class TradeDayUpdater:
                 meta = stock_meta.get(ts_code, {})
                 name = meta.get('name') or ''
 
+                close_val = row.get('close')
+                if pd.isna(close_val):
+                    close_val = row.get('close_daily')
+
                 records.append({
                     'trade_date': date,
                     'ts_code': ts_code,
                     'symbol': symbol,
                     'name': name,
-                    'close_price': float(row.get('close', 0)) if pd.notna(row.get('close')) else None,
-                    'pct_change': float(row.get('pct_chg', 0)) if pd.notna(row.get('pct_chg')) else None,
+                    'close': float(close_val) if pd.notna(close_val) else None,
+                    'pct_chg': float(row.get('pct_chg', 0)) if pd.notna(row.get('pct_chg')) else None,
                     'turnover_rate': float(row.get('turnover_rate', 0)) if pd.notna(row.get('turnover_rate')) else None,
                     'turnover_rate_f': float(row.get('turnover_rate_f', 0)) if pd.notna(row.get('turnover_rate_f')) else None,
                     'volume_ratio': float(row.get('volume_ratio', 0)) if pd.notna(row.get('volume_ratio')) else None,
                     'pe_ttm': float(row.get('pe_ttm', 0)) if pd.notna(row.get('pe_ttm')) else None,
-                    'pe_lyr': float(row.get('pe', 0)) if pd.notna(row.get('pe')) else None,
+                    'pe': float(row.get('pe', 0)) if pd.notna(row.get('pe')) else None,
                     'pb': float(row.get('pb', 0)) if pd.notna(row.get('pb')) else None,
+                    'ps': float(row.get('ps', 0)) if pd.notna(row.get('ps')) else None,
                     'ps_ttm': float(row.get('ps_ttm', 0)) if pd.notna(row.get('ps_ttm')) else None,
+                    'dv_ratio': float(row.get('dv_ratio', 0)) if pd.notna(row.get('dv_ratio')) else None,
                     'dv_ttm': float(row.get('dv_ttm', 0)) if pd.notna(row.get('dv_ttm')) else None,
                     'total_share': int(row.get('total_share', 0)) if pd.notna(row.get('total_share')) else None,
                     'float_share': int(row.get('float_share', 0)) if pd.notna(row.get('float_share')) else None,
@@ -836,7 +892,7 @@ class TradeDayUpdater:
 
             df = pd.DataFrame(rows)
             df['amount'] = pd.to_numeric(df['amount'], errors='coerce')
-            df['pct_change'] = pd.to_numeric(df['pct_change'], errors='coerce')
+            df['pct_chg'] = pd.to_numeric(df['pct_chg'], errors='coerce')
             df['total_mv'] = pd.to_numeric(df['total_mv'], errors='coerce')
             df = df.drop_duplicates(subset=['ts_code'], keep='first')
 
@@ -862,13 +918,13 @@ class TradeDayUpdater:
                     'ts_code': row['ts_code'],
                     'symbol': row['symbol'],
                     'name': row['name'],
-                    'close_price': row['close_price'],
-                    'pct_change': row['pct_change'],
+                    'close_price': row['close'],
+                    'pct_change': row['pct_chg'],
                     'amount': row['amount'],
                     'total_mv': row['total_mv'],
                 })
 
-            gainers = df[df['pct_change'].notna()].nlargest(100, 'pct_change')
+            gainers = df[df['pct_chg'].notna()].nlargest(100, 'pct_chg')
             for i, (_, row) in enumerate(gainers.iterrows(), 1):
                 groups.append({
                     'trade_date': date,
@@ -877,13 +933,13 @@ class TradeDayUpdater:
                     'ts_code': row['ts_code'],
                     'symbol': row['symbol'],
                     'name': row['name'],
-                    'close_price': row['close_price'],
-                    'pct_change': row['pct_change'],
+                    'close_price': row['close'],
+                    'pct_change': row['pct_chg'],
                     'amount': row['amount'],
                     'total_mv': row['total_mv'],
                 })
 
-            losers = df[df['pct_change'].notna()].nsmallest(100, 'pct_change')
+            losers = df[df['pct_chg'].notna()].nsmallest(100, 'pct_chg')
             for i, (_, row) in enumerate(losers.iterrows(), 1):
                 groups.append({
                     'trade_date': date,
@@ -892,8 +948,8 @@ class TradeDayUpdater:
                     'ts_code': row['ts_code'],
                     'symbol': row['symbol'],
                     'name': row['name'],
-                    'close_price': row['close_price'],
-                    'pct_change': row['pct_change'],
+                    'close_price': row['close'],
+                    'pct_change': row['pct_chg'],
                     'amount': row['amount'],
                     'total_mv': row['total_mv'],
                 })

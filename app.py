@@ -14,7 +14,6 @@ from tools import (
     get_gem_pe_series,
 )
 from tools.financial_data import EconomicIndicators
-from tools.storage_utils import save_review_data, load_review_data
 from data_sources import (
     _normalize_top_stocks_df,
     _df_to_records,
@@ -81,15 +80,28 @@ def _series_from_df(df, value_col, days):
 
 
 def build_external_section(days=120):
+    usdcny_metric = None
     btc_metric = None
-    us10y_metric = None
     xau_metric = None
+    wti_metric = None
+    us10y_metric = None
 
+    usdcny_series = []
     btc_series = []
-    us10y_series = []
     xau_series = []
+    wti_series = []
+    us10y_series = []
 
     fetch_len = max(int(days * 2), 60)
+
+    try:
+        usdcny_df = EconomicIndicators.get_exchangerates_daily(from_currency="USD", to_currency="CNY", curDate=fetch_len)
+        if usdcny_df is not None and not usdcny_df.empty:
+            usdcny_df = usdcny_df.copy().reset_index().rename(columns={"index": "date", "4. close": "value"})
+        usdcny_metric = _latest_metric_from_df(usdcny_df, "value")
+        usdcny_series = _series_from_df(usdcny_df, "value", days)
+    except Exception:
+        usdcny_metric = None
 
     try:
         btc_df = EconomicIndicators.get_crypto_daily(symbol="BTC", market="USD", curDate=fetch_len)
@@ -112,6 +124,13 @@ def build_external_section(days=120):
     except Exception:
         xau_metric = None
 
+    try:
+        wti_df = EconomicIndicators.get_commodities(commodity="WTI", interval="daily", curDate=fetch_len)
+        wti_metric = _latest_metric_from_df(wti_df, "value")
+        wti_series = _series_from_df(wti_df, "value", days)
+    except Exception:
+        wti_metric = None
+
     def _attach_change(metric, change_kind, series):
         if not metric:
             return None
@@ -132,9 +151,11 @@ def build_external_section(days=120):
         }
 
     return {
+        "usdcny": _attach_change(usdcny_metric, "pct", usdcny_series),
         "btc": _attach_change(btc_metric, "pct", btc_series),
-        "us10y": _attach_change(us10y_metric, "bp", us10y_series),
         "xau": _attach_change(xau_metric, "pct", xau_series),
+        "wti": _attach_change(wti_metric, "pct", wti_series),
+        "us10y": _attach_change(us10y_metric, "bp", us10y_series),
     }
 
 
@@ -211,13 +232,17 @@ def _build_external_metric_from_df(df, change_kind="pct", days=120):
 
 
 def build_external_section_from_mysql(select_date, days=120):
+    usdcny_df = _load_external_asset_series_from_mysql("USDCNY", select_date, days=days)
     btc_df = _load_external_asset_series_from_mysql("BTCUSD", select_date, days=days)
     xau_df = _load_external_asset_series_from_mysql("XAUUSD", select_date, days=days)
+    wti_df = _load_external_asset_series_from_mysql("WTI", select_date, days=days)
     us10y_df = _load_external_asset_series_from_mysql("US10Y", select_date, days=days)
     return {
+        "usdcny": _build_external_metric_from_df(usdcny_df, "pct", days=days),
         "btc": _build_external_metric_from_df(btc_df, "pct", days=days),
-        "us10y": _build_external_metric_from_df(us10y_df, "bp", days=days),
         "xau": _build_external_metric_from_df(xau_df, "pct", days=days),
+        "wti": _build_external_metric_from_df(wti_df, "pct", days=days),
+        "us10y": _build_external_metric_from_df(us10y_df, "bp", days=days),
     }
 
 
@@ -253,7 +278,7 @@ def _load_range_distribution_from_mysql(select_date):
         return []
     rows = _query_mysql(
         """
-        SELECT sdb.pct_change AS pct
+        SELECT sdb.pct_chg AS pct
         FROM stock_daily_basic sdb
         LEFT JOIN stock_master sm ON sdb.ts_code = sm.ts_code
         WHERE sdb.trade_date = %s
@@ -709,39 +734,6 @@ def build_review_data(select_date, show_modules=None):
     return review_data
 
 
-def build_review_data_from_mysql(select_date, show_modules=None):
-    review_data = {"date": select_date.strftime("%Y-%m-%d")}
-
-    def _should(key):
-        return show_modules is None or show_modules.get(key, True)
-
-    if _should("external"):
-        review_data["external"] = build_external_section_from_mysql(select_date)
-    else:
-        review_data["external"] = {}
-
-    if _should("market"):
-        review_data["indices"] = _load_realtime_indices(select_date)
-        review_data["market_overview"] = _load_market_overview_from_mysql(select_date)
-        # 融资净买入和创业板PE前端统一走实时，不从MySQL读取
-        review_data["financing_series"] = []
-        review_data["gem_pe_series"] = []
-    else:
-        review_data["indices"] = {"sh_df": [], "cyb_df": [], "kcb_df": []}
-        review_data["market_overview"] = {}
-        review_data["financing_series"] = []
-        review_data["gem_pe_series"] = []
-
-    if _should("top100"):
-        review_data.update(build_top100_section_from_mysql(select_date))
-    else:
-        review_data["top_100_turnover"] = []
-        review_data["top_100_range"] = {"sh_stocks": [], "cyb_kcb_stocks": []}
-        review_data["top_100_gainers"] = []
-        review_data["top_100_losers"] = []
-
-    return review_data
-
 def display_review_data(review_data, show_modules=None):
     show_modules = show_modules or {}
     date_str = review_data.get('date')
@@ -774,9 +766,11 @@ def display_review_data(review_data, show_modules=None):
                 return None
             return fmt.format(value)
 
+        usdcny = external.get("usdcny") or {}
         btc = external.get("btc") or {}
-        us10y = external.get("us10y") or {}
         xau = external.get("xau") or {}
+        wti = external.get("wti") or {}
+        us10y = external.get("us10y") or {}
 
         def _render_sparkline(series, color):
             if not series:
@@ -805,8 +799,18 @@ def display_review_data(review_data, show_modules=None):
             )
             st.plotly_chart(fig, use_container_width=False)
 
-        cols = st.columns(3)
+        cols = st.columns(5)
         with cols[0]:
+            st.metric(
+                "人民币汇率 (USD/CNY)",
+                _format_value(usdcny.get("value"), "{:.4f}"),
+                _format_delta(usdcny.get("change"), "{:+.2f}%"),
+            )
+            usdcny_date = _format_date(usdcny.get("date"))
+            if usdcny_date:
+                st.caption(f"日期: {usdcny_date}")
+            _render_sparkline(usdcny.get("series") or [], "#27ae60")
+        with cols[1]:
             st.metric(
                 "\u6bd4\u7279\u5e01 (BTC/USD)",
                 _format_value(btc.get("value"), "${:,.0f}"),
@@ -816,7 +820,7 @@ def display_review_data(review_data, show_modules=None):
             if btc_date:
                 st.caption(f"\u65e5\u671f: {btc_date}")
             _render_sparkline(btc.get("series") or [], "#f39c12")
-        with cols[1]:
+        with cols[2]:
             st.metric(
                 "XAU 金价 (USD/oz)",
                 _format_value(xau.get("value"), "{:,.2f}"),
@@ -826,7 +830,17 @@ def display_review_data(review_data, show_modules=None):
             if xau_date:
                 st.caption(f"\u65e5\u671f: {xau_date}")
             _render_sparkline(xau.get("series") or [], "#d4af37")
-        with cols[2]:
+        with cols[3]:
+            st.metric(
+                "WTI 油价 (USD/bbl)",
+                _format_value(wti.get("value"), "{:,.2f}"),
+                _format_delta(wti.get("change"), "{:+.2f}%"),
+            )
+            wti_date = _format_date(wti.get("date"))
+            if wti_date:
+                st.caption(f"日期: {wti_date}")
+            _render_sparkline(wti.get("series") or [], "#e67e22")
+        with cols[4]:
             st.metric(
                 "\u7f8e\u56fd10Y\u56fd\u503a\u6536\u76ca\u7387",
                 _format_value(us10y.get("value"), "{:.2f}%"),
@@ -1263,34 +1277,13 @@ show_modules = {
     "market": show_market,
     "top100": show_top100,
 }
-btn_cols = st.columns(2)
-with btn_cols[0]:
-    load_btn = st.button("Load")
-with btn_cols[1]:
-    realtime_load_btn = st.button("实时Load")
+realtime_load_btn = st.button("实时Load")
 
-if load_btn or realtime_load_btn:
+if realtime_load_btn:
     if select_date.weekday() >= 5: 
         st.warning("非交易日")
         st.stop()
-    
-    # date_str = select_date.strftime('%Y-%m-%d')
-    # cached_data = load_review_data(date_str)
-    # if cached_data:
-    #     st.info(f"使用已缓存复盘数据: {date_str}")
-    #     display_review_data(cached_data)
-    # else:
-    if realtime_load_btn:
-        review_data = build_review_data(select_date, show_modules)
-        st.info("已按实时方案取数")
-    else:
-        review_data = build_review_data_from_mysql(select_date, show_modules)
-        st.info("已按MySQL持久化数据取数（K线实时）")
-        if show_modules.get("top100", True) and not review_data.get("top_100_turnover"):
-            st.warning("MySQL中未命中TOP100分组数据，可点击“实时Load”兜底。")
-    #     if is_review_data_complete(review_data):
-    #         save_review_data(date_str, review_data)
-    #         st.success(f"复盘数据已保存: {date_str}")
-    #     else:
-    #         st.warning("复盘数据不完整，未写入缓存")
+
+    review_data = build_review_data(select_date, show_modules)
+    st.info("已按实时方案取数")
     display_review_data(review_data, show_modules)

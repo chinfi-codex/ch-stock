@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+﻿#!/usr/bin/env python
 # -*- coding: utf-8 -*-
 """
 数据库初始化脚本
@@ -164,15 +164,17 @@ def init_database():
                     ts_code VARCHAR(20) NOT NULL COMMENT 'Tushare代码',
                     symbol VARCHAR(20) NULL COMMENT '股票代码',
                     name VARCHAR(100) NULL COMMENT '股票名称',
-                    close_price DECIMAL(12, 4) NULL COMMENT '收盘价',
-                    pct_change DECIMAL(8, 4) NULL COMMENT '涨跌幅%',
+                    close DECIMAL(12, 4) NULL COMMENT '收盘价',
+                    pct_chg DECIMAL(8, 4) NULL COMMENT '涨跌幅%',
                     turnover_rate DECIMAL(8, 4) NULL COMMENT '换手率%',
                     turnover_rate_f DECIMAL(8, 4) NULL COMMENT '换手率(自由流通股)%',
                     volume_ratio DECIMAL(8, 4) NULL COMMENT '量比',
                     pe_ttm DECIMAL(12, 4) NULL COMMENT '市盈率TTM',
-                    pe_lyr DECIMAL(12, 4) NULL COMMENT '市盈率(LYR)',
+                    pe DECIMAL(12, 4) NULL COMMENT '市盈率(LYR)',
                     pb DECIMAL(12, 4) NULL COMMENT '市净率',
+                    ps DECIMAL(12, 4) NULL COMMENT '市销率',
                     ps_ttm DECIMAL(12, 4) NULL COMMENT '市销率TTM',
+                    dv_ratio DECIMAL(12, 4) NULL COMMENT '股息率',
                     dv_ttm DECIMAL(12, 4) NULL COMMENT '股息率%',
                     total_share BIGINT NULL COMMENT '总股本(万股)',
                     float_share BIGINT NULL COMMENT '流通股本(万股)',
@@ -185,7 +187,7 @@ def init_database():
                     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
                     UNIQUE KEY uk_date_code (trade_date, ts_code),
                     INDEX idx_code_date (ts_code, trade_date),
-                    INDEX idx_pct (pct_change),
+                    INDEX idx_pct (pct_chg),
                     INDEX idx_amount (amount),
                     INDEX idx_mv (total_mv)
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='全市场股票日指标'
@@ -383,3 +385,4 @@ def init_database():
 
 if __name__ == '__main__':
     init_database()
+
