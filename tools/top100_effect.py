@@ -1,5 +1,3 @@
-import os
-import re
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import date, datetime, timedelta
 from typing import Any, Dict, List, Tuple
@@ -10,6 +8,7 @@ import streamlit as st
 import tushare as ts
 
 from .market_data import get_all_stocks
+from .utils import get_tushare_token, get_tushare_pro, convert_to_ts_code, extract_code6, classify_board, normalize_trade_date
 
 
 PATTERN_LABELS = {
@@ -21,20 +20,9 @@ PATTERN_LABELS = {
 }
 
 
-def _get_tushare_token() -> str:
-    token = None
-    try:
-        token = st.secrets.get("tushare_token")
-    except Exception:
-        token = None
-    return token or os.environ.get("TUSHARE_TOKEN", "")
-
-
-def _get_pro():
-    token = _get_tushare_token()
-    if not token:
-        raise RuntimeError("Missing TUSHARE_TOKEN")
-    return ts.pro_api(token)
+# 使用 tools/utils.py 中的函数
+_get_tushare_token = get_tushare_token
+_get_pro = get_tushare_pro
 
 
 def _normalize_trade_date(trade_date: Any) -> Tuple[str, date]:
@@ -44,33 +32,10 @@ def _normalize_trade_date(trade_date: Any) -> Tuple[str, date]:
     return dt.strftime("%Y%m%d"), dt.date()
 
 
-def _to_ts_code(value: str) -> str:
-    raw = str(value).strip().upper()
-    if "." in raw:
-        return raw
-    code = re.sub(r"\D", "", raw)
-    if len(code) != 6:
-        return raw
-    if code.startswith(("0", "3")):
-        return f"{code}.SZ"
-    if code.startswith(("6", "9")):
-        return f"{code}.SH"
-    if code.startswith("8"):
-        return f"{code}.BJ"
-    return raw
-
-
-def _extract_code6(value: str) -> str:
-    m = re.search(r"(\d{6})", str(value))
-    return m.group(1) if m else ""
-
-
-def _classify_board(code6: str) -> str:
-    if code6.startswith("688"):
-        return "科创板"
-    if code6.startswith(("300", "301")):
-        return "创业板"
-    return "主板"
+# 使用 tools/utils.py 中的函数
+_to_ts_code = convert_to_ts_code
+_extract_code6 = extract_code6
+_classify_board = classify_board
 
 
 def validate_trade_day(trade_date: date) -> tuple[bool, str]:

@@ -18,183 +18,38 @@ import tushare as ts
 
 from tools.market_data import get_all_stocks
 from tools.stock_data import plotK, get_ak_price_df
+from tools.utils import get_tushare_token, convert_to_ts_code, pick_first_column, to_number
+from data_sources import (
+    _normalize_concept_kline,
+    _normalize_index_kline,
+    _normalize_em_kline,
+    _normalize_spot_df,
+    get_concept_kline_data,
+    get_concept_list,
+    get_benchmark_kline,
+)
+from indicators import (
+    calculate_ma,
+    calculate_ma_slope,
+    calculate_adx,
+    calculate_atr,
+    calculate_obv,
+    calculate_adl,
+    calculate_max_drawdown,
+    calculate_downside_vol,
+)
 
 
-def calculate_ma(prices, period):
-    """计算移动平均线"""
-    return prices.rolling(window=period).mean()
+# 使用从 data_sources.py 和 indicators.py 导入的函数
+# 删除重复的函数定义，使用导入的函数：
+# - calculate_ma, calculate_ma_slope (from indicators)
+# - _normalize_concept_kline, _normalize_index_kline (from data_sources)
+# - get_concept_kline_data, get_concept_list (from data_sources)
 
 
-def calculate_ma_slope(ma_values, period=5):
-    """
-    计算均线斜率
-    使用最近period天的数据进行线性回归，返回斜率
-    """
-    if len(ma_values) < period:
-        return 0
-
-    recent_values = ma_values[-period:].values
-    x = np.arange(len(recent_values))
-
-    # 线性回归计算斜率
-    slope = np.polyfit(x, recent_values, 1)[0]
-    return slope
-
-
-def _normalize_concept_kline(df):
-    df = df.rename(
-        columns={
-            "日期": "date",
-            "开盘价": "open",
-            "最高价": "high",
-            "最低价": "low",
-            "收盘价": "close",
-            "成交量": "volume",
-            "成交额": "amount",
-        }
-    )
-    df["date"] = pd.to_datetime(df["date"])
-    df = df.sort_values("date")
-    df = df.set_index("date")
-    return df
-
-
-def _normalize_index_kline(df):
-    df = df.rename(
-        columns={
-            "date": "date",
-            "open": "open",
-            "high": "high",
-            "low": "low",
-            "close": "close",
-            "volume": "volume",
-        }
-    )
-    df["date"] = pd.to_datetime(df["date"])
-    df = df.sort_values("date")
-    df = df.set_index("date")
-    return df
-
-
-@st.cache_data(ttl="1d")
-def get_concept_kline_data(concept_name, start_date, end_date):
-    """
-    获取概念板块K线数据（缓存）
-    """
-    try:
-        df = ak.stock_board_concept_index_ths(
-            symbol=concept_name,
-            start_date=start_date,
-            end_date=end_date,
-        )
-        if df is None or df.empty:
-            return None
-        return _normalize_concept_kline(df)
-    except Exception as e:
-        print(f"获取 {concept_name} 数据失败: {e}")
-        return None
-
-
-@st.cache_data(ttl="1d")
-def get_concept_list():
-    """
-    获取所有概念板块列表
-    """
-    try:
-        return ak.stock_board_concept_name_ths()
-    except Exception:
-        return None
-
-
-@st.cache_data(ttl="1d")
-def get_em_concept_list():
-    """
-    获取东方财富概念板块列表（缓存）
-    """
-    try:
-        return ak.stock_board_concept_name_em()
-    except Exception:
-        return None
-
-
-@st.cache_data(ttl="1d")
-def get_em_concept_cons(concept_name):
-    """
-    获取东方财富概念板块成分股（缓存）
-    """
-    try:
-        return ak.stock_board_concept_cons_em(symbol=concept_name)
-    except Exception:
-        return None
-
-
-@st.cache_data(ttl="1d")
-def get_em_concept_hist(concept_name, start_date, end_date):
-    """
-    获取东方财富概念板块指数K线（缓存）
-    """
-    try:
-        df = ak.stock_board_concept_hist_em(
-            symbol=concept_name,
-            period="daily",
-            start_date=start_date,
-            end_date=end_date,
-            adjust="",
-        )
-        if df is None or df.empty:
-            return None
-        return _normalize_em_kline(df)
-    except Exception:
-        return None
-
-
-@st.cache_data(ttl="1d")
-def get_stock_hist(symbol, start_date, end_date):
-    """
-    获取个股K线（缓存）
-    """
-    try:
-        df = ak.stock_zh_a_hist(
-            symbol=symbol,
-            period="daily",
-            start_date=start_date,
-            end_date=end_date,
-            adjust="",
-        )
-        if df is None or df.empty:
-            return None
-        return _normalize_em_kline(df)
-    except Exception:
-        return None
-
-
-def _normalize_em_kline(df):
-    rename_map = {
-        "日期": "date",
-        "开盘": "open",
-        "开盘价": "open",
-        "最高": "high",
-        "最高价": "high",
-        "最低": "low",
-        "最低价": "low",
-        "收盘": "close",
-        "收盘价": "close",
-        "成交量": "volume",
-        "成交额": "amount",
-    }
-    df = df.rename(columns=rename_map)
-    if "date" not in df.columns:
-        return df
-    df["date"] = pd.to_datetime(df["date"])
-    df = df.sort_values("date").set_index("date")
-    return df
-
-
-def _pick_first_column(df, candidates):
-    for candidate in candidates:
-        if candidate in df.columns:
-            return candidate
-    return None
+# 使用从 data_sources.py 导入的 _normalize_em_kline, _pick_first_column (即 pick_first_column)
+# 使用 tools.utils.pick_first_column 替代 _pick_first_column
+_pick_first_column = pick_first_column
 
 
 def _detect_sector_stage(sector_df):
@@ -220,135 +75,18 @@ def _detect_sector_stage(sector_df):
     return "divergence"
 
 
-@st.cache_data(ttl="1d")
-def get_benchmark_kline(start_date, end_date, symbol="sh000001"):
-    df = ak.stock_zh_index_daily(symbol=symbol)
-    if df is None or df.empty:
-        return None
-    df = _normalize_index_kline(df)
-    start_dt = pd.to_datetime(start_date)
-    end_dt = pd.to_datetime(end_date)
-    df = df.loc[start_dt:end_dt]
-    return df
+# 使用从 data_sources.py 导入的 get_benchmark_kline
 
 
-def calculate_adx(df, period=14):
-    high = df["high"]
-    low = df["low"]
-    close = df["close"]
-
-    tr = pd.concat(
-        [
-            (high - low),
-            (high - close.shift(1)).abs(),
-            (low - close.shift(1)).abs(),
-        ],
-        axis=1,
-    ).max(axis=1)
-
-    plus_dm = (high - high.shift(1)).where(
-        (high - high.shift(1)) > (low.shift(1) - low), 0.0
-    )
-    plus_dm = plus_dm.where(plus_dm > 0, 0.0)
-    minus_dm = (low.shift(1) - low).where(
-        (low.shift(1) - low) > (high - high.shift(1)), 0.0
-    )
-    minus_dm = minus_dm.where(minus_dm > 0, 0.0)
-
-    tr_smooth = tr.rolling(window=period).sum()
-    plus_dm_smooth = plus_dm.rolling(window=period).sum()
-    minus_dm_smooth = minus_dm.rolling(window=period).sum()
-
-    plus_di = 100 * (plus_dm_smooth / tr_smooth.replace(0, np.nan))
-    minus_di = 100 * (minus_dm_smooth / tr_smooth.replace(0, np.nan))
-    dx = (
-        100
-        * (plus_di - minus_di).abs()
-        / (plus_di + minus_di).replace(0, np.nan)
-    )
-    adx = dx.rolling(window=period).mean()
-    return adx
+# 使用从 indicators.py 导入的函数：
+# - calculate_adx, calculate_atr, calculate_obv, calculate_adl
+# - calculate_max_drawdown, calculate_downside_vol
+# 使用 tools.utils.to_number 替代 _to_number
+_to_number = to_number
 
 
-def calculate_atr(df, period=14):
-    high = df["high"]
-    low = df["low"]
-    close = df["close"]
-    tr = pd.concat(
-        [
-            (high - low),
-            (high - close.shift(1)).abs(),
-            (low - close.shift(1)).abs(),
-        ],
-        axis=1,
-    ).max(axis=1)
-    return tr.rolling(window=period).mean()
-
-
-def calculate_obv(df):
-    direction = np.sign(df["close"].diff()).fillna(0)
-    return (direction * df["volume"]).cumsum()
-
-
-def calculate_adl(df):
-    high = df["high"]
-    low = df["low"]
-    close = df["close"]
-    volume = df["volume"]
-    mfm = ((close - low) - (high - close)) / (high - low).replace(0, np.nan)
-    mfv = mfm * volume
-    return mfv.cumsum()
-
-
-def calculate_max_drawdown(close_series, window):
-    rolling_max = close_series.rolling(window=window, min_periods=1).max()
-    drawdown = close_series / rolling_max - 1
-    return drawdown.tail(window).min()
-
-
-def calculate_downside_vol(returns, window):
-    downside = returns.where(returns < 0, np.nan)
-    return downside.tail(window).std()
-
-
-def _to_number(series):
-    if series is None:
-        return None
-    s = series.astype(str).str.replace("%", "", regex=False)
-    return pd.to_numeric(s, errors="coerce")
-
-
-def _normalize_spot_df(df):
-    if df is None or df.empty:
-        return pd.DataFrame()
-    if {"code", "name", "pct", "amount", "mkt_cap"}.issubset(df.columns):
-        view = df[["code", "name", "pct", "amount", "mkt_cap"]].copy()
-        view["pct"] = _to_number(view["pct"])
-        view["amount"] = _to_number(view["amount"])
-        view["mkt_cap"] = _to_number(view["mkt_cap"])
-        view = view.dropna(subset=["code", "name", "pct", "amount", "mkt_cap"])
-        return view
-
-    code_col = _pick_first_column(df, ["代码", "股票代码", "symbol"])
-    name_col = _pick_first_column(df, ["名称", "股票名称", "name"])
-    pct_col = _pick_first_column(df, ["涨跌幅", "涨跌幅(%)", "涨跌幅%", "pct_chg"])
-    amount_col = _pick_first_column(df, ["成交额", "成交额(千元)", "成交额(万元)", "amount"])
-    mkt_cap_col = _pick_first_column(df, ["总市值", "总市值(千元)", "总市值(万元)", "total_mv"])
-
-    if not all([code_col, name_col, pct_col, amount_col, mkt_cap_col]):
-        return pd.DataFrame()
-
-    view = df[[code_col, name_col, pct_col, amount_col, mkt_cap_col]].copy()
-    view.columns = ["code", "name", "pct", "amount", "mkt_cap"]
-    view["pct"] = _to_number(view["pct"])
-    view["amount"] = _to_number(view["amount"])
-    view["mkt_cap"] = _to_number(view["mkt_cap"])
-    if amount_col == "amount":
-        view["amount"] = view["amount"] * 1000
-    if mkt_cap_col == "total_mv":
-        view["mkt_cap"] = view["mkt_cap"] * 10000
-    view = view.dropna(subset=["code", "name", "pct", "amount", "mkt_cap"])
-    return view
+# 使用从 data_sources.py 导入的 _normalize_spot_df
+# 注意：data_sources.py 中的 _normalize_spot_df 使用 _to_number 和 _pick_first_column
 
 
 @st.cache_data(ttl="30m")
@@ -357,28 +95,15 @@ def get_spot_pool(base_date=None):
 
 
 def _fetch_kline_df(code, end_date, lookback_days, adjust_mode, include_amount):
-    token = st.secrets.get("tushare_token") or os.environ.get("TUSHARE_TOKEN")
+    token = get_tushare_token()
     if not token:
         st.error("Missing TUSHARE_TOKEN; cannot fetch market data")
         return pd.DataFrame()
     pro = ts.pro_api(token)
 
-    def _to_ts_code(c):
-        c = str(c).strip().upper()
-        if "." in c:
-            return c.replace(".SS", ".SH")
-        if len(c) == 6 and c.isdigit():
-            if c.startswith(("0", "3")):
-                return f"{c}.SZ"
-            if c.startswith(("6", "9")):
-                return f"{c}.SH"
-            if c.startswith("8"):
-                return f"{c}.BJ"
-        return c
-
     end_str = end_date.strftime("%Y%m%d")
     start_date = (end_date - timedelta(days=lookback_days * 2)).strftime("%Y%m%d")
-    ts_code = _to_ts_code(code)
+    ts_code = convert_to_ts_code(code)
 
     try:
         raw = pro.daily(

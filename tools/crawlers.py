@@ -13,7 +13,7 @@ import hashlib
 from bs4 import BeautifulSoup
 import logging
 import os
-from urllib.parse import urljoin, urlparse
+from urllib.parse import urljoin
 from .utils import scrape_with_jina_reader, clean_filename
 
 logger = logging.getLogger(__name__)

@@ -65,6 +65,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from database.db_manager import DBManager, get_db
 from tools.kline_patterns import KLinePatternRecognizer, PatternResult
+from tools.utils import get_tushare_token, convert_to_ts_code
 
 # 配置日志
 logging.basicConfig(
@@ -85,14 +86,7 @@ class TradeDayUpdater:
         
     def _init_tushare(self):
         """初始化Tushare API"""
-        token = os.getenv('TUSHARE_TOKEN')
-        if not token:
-            # 尝试从streamlit secrets读取
-            try:
-                import streamlit as st
-                token = st.secrets.get("tushare_token")
-            except:
-                pass
+        token = get_tushare_token()
         
         if token:
             ts.set_token(token)

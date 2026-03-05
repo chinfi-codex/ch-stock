@@ -3,16 +3,275 @@
 包含通用的工具函数和辅助方法
 """
 
-import streamlit as st
-import requests
-import pandas as pd
 import os
-import datetime
 import re
 import logging
+from datetime import datetime, timedelta, date
+from typing import Any, Optional, Union
+
+import pandas as pd
+import streamlit as st
+import requests
+import tushare as ts
 from fake_useragent import UserAgent
 
 logger = logging.getLogger(__name__)
+
+
+# =============================================================================
+# Tushare 相关工具函数
+# =============================================================================
+
+def get_tushare_token() -> str:
+    """
+    获取 Tushare Token
+    优先级：环境变量 > streamlit secrets > .env文件
+    
+    Returns:
+        str: Tushare token，如果未找到则返回空字符串
+    """
+    # 1. 尝试从环境变量获取
+    token = os.environ.get("TUSHARE_TOKEN", "").strip()
+    if token:
+        return token
+    
+    # 2. 尝试从 streamlit secrets 获取
+    try:
+        token = st.secrets.get("tushare_token", "")
+        if token:
+            return token.strip()
+    except Exception:
+        pass
+    
+    # 3. 尝试从 .env 文件获取
+    try:
+        env_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".env"))
+        if os.path.exists(env_path):
+            with open(env_path, "r", encoding="utf-8") as f:
+                for line in f:
+                    s = line.strip()
+                    if not s or s.startswith("#") or "=" not in s:
+                        continue
+                    k, v = s.split("=", 1)
+                    if k.strip() == "TUSHARE_TOKEN":
+                        token = v.strip().strip('"').strip("'")
+                        if token:
+                            return token
+    except Exception:
+        pass
+    
+    return ""
+
+
+def get_tushare_pro() -> ts.ProApi:
+    """
+    获取 Tushare Pro API 客户端
+    
+    Returns:
+        ts.ProApi: Tushare Pro API 客户端
+        
+    Raises:
+        RuntimeError: 如果无法获取 TUSHARE_TOKEN
+    """
+    token = get_tushare_token()
+    if not token:
+        raise RuntimeError("Missing TUSHARE_TOKEN: 请设置环境变量或在 .streamlit/secrets.toml 中配置")
+    return ts.pro_api(token)
+
+
+# =============================================================================
+# 股票代码转换工具函数
+# =============================================================================
+
+def convert_to_ts_code(code: Optional[str]) -> str:
+    """
+    将多种股票代码格式转换为 Tushare ts_code 格式 (xxxxxx.SH/SZ/BJ)
+    
+    支持的输入格式：
+    - 纯数字: 000001, 600000
+    - 带前缀: sz000001, sh600000, SZ000001, SH600000
+    - ts_code: 000001.SZ, 600000.SH
+    
+    Args:
+        code: 股票代码
+        
+    Returns:
+        str: 标准 ts_code 格式
+        
+    Raises:
+        ValueError: 如果 code 为 None 或空字符串
+    """
+    if code is None:
+        raise ValueError("股票代码不能为空")
+    
+    code = str(code).strip()
+    if not code:
+        raise ValueError("股票代码不能为空")
+    
+    upper_code = code.upper()
+    
+    # 已经是 ts_code 格式
+    if "." in upper_code:
+        prefix, suffix = upper_code.split(".", 1)
+        suffix = suffix.replace("SS", "SH")  # 兼容 SS 后缀
+        if suffix in {"SH", "SZ", "BJ"}:
+            return f"{prefix}.{suffix}"
+    
+    # 带前缀格式 (szxxxxxx, shxxxxxx, bjxxxxxx)
+    if upper_code.startswith(("SZ", "SH", "BJ")) and len(upper_code) >= 8:
+        body = upper_code[2:]
+        suffix = upper_code[:2]
+        return f"{body}.{suffix}"
+    
+    # 纯数字格式
+    if len(code) == 6 and code.isdigit():
+        if code.startswith(("0", "3")):
+            return f"{code}.SZ"
+        elif code.startswith(("6", "9")):
+            return f"{code}.SH"
+        elif code.startswith("8"):
+            return f"{code}.BJ"
+    
+    # 无法识别的格式，原样返回
+    return upper_code
+
+
+def convert_to_ak_code(code: str) -> str:
+    """
+    将股票代码转换为 AKShare 格式 (shxxxxxx/szxxxxxx/bjxxxxxx)
+    
+    Args:
+        code: 股票代码
+        
+    Returns:
+        str: AKShare 格式代码
+    """
+    code = str(code).strip()
+    
+    # 已经是 ak_code 格式
+    if code.lower().startswith(("sh", "sz", "bj")) and len(code) >= 8:
+        return code.lower()
+    
+    # ts_code 格式
+    if "." in code:
+        parts = code.split(".")
+        if len(parts) == 2 and parts[1].upper() in ("SH", "SZ", "BJ"):
+            return f"{parts[1].lower()}{parts[0]}"
+    
+    # 纯数字格式
+    if len(code) == 6 and code.isdigit():
+        if code.startswith(("0", "3")):
+            return f"sz{code}"
+        elif code.startswith(("6", "9")):
+            return f"sh{code}"
+        elif code.startswith("8"):
+            return f"bj{code}"
+    
+    return code.lower()
+
+
+def extract_code6(value: str) -> str:
+    """
+    从字符串中提取6位股票代码
+    
+    Args:
+        value: 包含股票代码的字符串
+        
+    Returns:
+        str: 6位数字股票代码，如果未找到则返回空字符串
+    """
+    m = re.search(r"(\d{6})", str(value))
+    return m.group(1) if m else ""
+
+
+def classify_board(code6: str) -> str:
+    """
+    根据6位股票代码判断所属板块
+    
+    Args:
+        code6: 6位股票代码
+        
+    Returns:
+        str: 板块名称 (主板/创业板/科创板/北交所)
+    """
+    if not code6 or len(code6) != 6:
+        return "未知"
+    
+    if code6.startswith("688") or code6.startswith("689"):
+        return "科创板"
+    if code6.startswith(("300", "301")):
+        return "创业板"
+    if code6.startswith("8") or code6.startswith("4"):
+        return "北交所"
+    if code6.startswith(("0", "3", "6")):
+        return "主板"
+    
+    return "未知"
+
+
+# =============================================================================
+# 数据处理工具函数
+# =============================================================================
+
+def pick_first_column(df: pd.DataFrame, candidates: list) -> Optional[str]:
+    """
+    从候选列名中选择第一个存在于 DataFrame 中的列名
+    
+    Args:
+        df: DataFrame
+        candidates: 候选列名列表
+        
+    Returns:
+        Optional[str]: 存在的列名，如果都不存在则返回 None
+    """
+    if df is None or df.empty:
+        return None
+    for name in candidates:
+        if name in df.columns:
+            return name
+    return None
+
+
+def to_number(series: Union[pd.Series, Any]) -> Optional[pd.Series]:
+    """
+    将 Series 转换为数值类型，移除百分号
+    
+    Args:
+        series: 输入数据
+        
+    Returns:
+        Optional[pd.Series]: 数值 Series，如果输入为 None 则返回 None
+    """
+    if series is None:
+        return None
+    s = series.astype(str).str.replace("%", "", regex=False)
+    return pd.to_numeric(s, errors="coerce")
+
+
+def normalize_trade_date(trade_date: Any) -> tuple:
+    """
+    标准化交易日期
+    
+    Args:
+        trade_date: 日期（支持多种格式）
+        
+    Returns:
+        tuple: (yyyyMMdd 格式字符串, date 对象)
+        
+    Raises:
+        ValueError: 如果日期格式无效
+    """
+    dt = pd.to_datetime(trade_date, errors="coerce")
+    if pd.isna(dt):
+        raise ValueError(f"Invalid trade date: {trade_date}")
+    return dt.strftime("%Y%m%d"), dt.date()
+
+
+# 为兼容旧代码，保留别名
+_to_ts_code = convert_to_ts_code
+_to_number = to_number
+_pick_first_column = pick_first_column
+_normalize_trade_date = normalize_trade_date
 
 
 def scrape_with_jina_reader(url: str, title: str = "", output_dir: str = "", save_to_file: bool = True) -> dict:
@@ -38,9 +297,21 @@ def scrape_with_jina_reader(url: str, title: str = "", output_dir: str = "", sav
         # 使用Jina Reader API
         jina_url = f"https://r.jina.ai/{url}"
         
+        # 获取 API Key
+        jina_api_key = _get_jina_api_key()
+        if not jina_api_key:
+            result = {
+                'success': False,
+                'content': '',
+                'filepath': '',
+                'error': "Missing JINA_API_KEY: 请设置环境变量或在 .streamlit/secrets.toml 中配置"
+            }
+            logger.error(result['error'])
+            return result
+        
         # 设置Jina Reader的请求头
         jina_headers = {
-            "Authorization": "Bearer jina_045be800274949e78721c55b34acf1b2qKdRArT9C8sCsFPoakPTpVObepOp",
+            "Authorization": f"Bearer {jina_api_key}",
             "X-Return-Format": "markdown",
             "X-With-Images-Summary": "true",
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
@@ -142,11 +413,30 @@ def df_drop_duplicated(df, subset=None, keep='first'):
     return df.drop_duplicates(subset=subset, keep=keep)
 
 
+def _get_pushplus_token() -> str:
+    """获取 PushPlus Token，优先级：环境变量 > streamlit secrets"""
+    token = os.environ.get("PUSHPLUS_TOKEN", "").strip()
+    if token:
+        return token
+    try:
+        token = st.secrets.get("pushplus_token", "")
+        if token:
+            return token
+    except Exception:
+        pass
+    return ""
+
+
 def notify_pushplus(title, content, topic):
     """推送消息到PushPlus"""
+    token = _get_pushplus_token()
+    if not token:
+        logger.error("Missing PUSHPLUS_TOKEN: 请设置环境变量或在 .streamlit/secrets.toml 中配置")
+        return None
+        
     url = 'http://www.pushplus.plus/send'
     payload = {
-       "token": "349218916e154f048fbafc4a7edd9563",
+       "token": token,
        "title": title,
        "content": content, 
        "topic": topic,
@@ -156,7 +446,7 @@ def notify_pushplus(title, content, topic):
        'User-Agent': 'Apifox/1.0.0 (https://apifox.com)',
        'Content-Type': 'application/json'
     }
-    resp = requests.post(url, payload, headers)
+    resp = requests.post(url, json=payload, headers=headers)
     return resp
 
 

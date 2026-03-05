@@ -7,10 +7,9 @@ import streamlit as st
 import pandas as pd
 import akshare as ak
 import os
-import json
 from datetime import datetime, date
 import tushare as ts
-from .utils import get_stock_list
+from .utils import get_stock_list, get_tushare_token
 
 
 def _get_index_amount(index_df, stat_date: str) -> float:
@@ -266,31 +265,7 @@ def get_gem_pe_series(days: int = 500) -> pd.DataFrame:
     return df[["date", "市盈率"]]
 
 
-@st.cache_data(ttl='1d')
-def _get_tushare_token():
-    """获取 Tushare token：环境变量优先，其次尝试 workspace/.env。"""
-    token = (os.environ.get("TUSHARE_TOKEN") or "").strip()
-    if token:
-        return token
-
-    # 兼容定时任务未 source .env 的场景
-    try:
-        env_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".env"))
-        if os.path.exists(env_path):
-            with open(env_path, "r", encoding="utf-8") as f:
-                for line in f:
-                    s = line.strip()
-                    if not s or s.startswith("#") or "=" not in s:
-                        continue
-                    k, v = s.split("=", 1)
-                    if k.strip() == "TUSHARE_TOKEN":
-                        token = v.strip().strip('"').strip("'")
-                        if token:
-                            return token
-    except Exception:
-        pass
-
-    return ""
+# 使用 tools/utils.py 中的 get_tushare_token 函数
 
 
 def get_market_data():
