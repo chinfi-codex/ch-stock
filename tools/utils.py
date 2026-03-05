@@ -63,7 +63,7 @@ def get_tushare_token() -> str:
     return ""
 
 
-def get_tushare_pro() -> ts.ProApi:
+def get_tushare_pro():
     """
     获取 Tushare Pro API 客户端
     
