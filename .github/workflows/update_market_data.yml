@@ -1,0 +1,52 @@
+name: Update Market Data
+
+on:
+  schedule:
+    # 北京时间下午5点 = UTC 上午9点
+    # 周一到周五运行（1-5 代表周一到周五）
+    - cron: '0 9 * * 1-5'
+  workflow_dispatch:  # 支持手动触发
+
+jobs:
+  update-market-data:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      with:
+        token: ${{ secrets.GITHUB_TOKEN }}
+    
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.10'
+    
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install pandas akshare tushare streamlit
+    
+    - name: Update market data
+      env:
+        TUSHARE_TOKEN: ${{ secrets.TUSHARE_TOKEN }}
+      run: |
+        python scripts/fetch_daily_market_data.py
+    
+    - name: Check for changes
+      id: check_changes
+      run: |
+        if git diff --quiet; then
+          echo "changed=false" >> $GITHUB_OUTPUT
+        else
+          echo "changed=true" >> $GITHUB_OUTPUT
+        fi
+    
+    - name: Commit and push changes
+      if: steps.check_changes.outputs.changed == 'true'
+      run: |
+        git config --local user.email "github-actions[bot]@users.noreply.github.com"
+        git config --local user.name "github-actions[bot]"
+        git add datas/market_data.csv
+        git commit -m "Update market data for $(date +'%Y-%m-%d')"
+        git push
