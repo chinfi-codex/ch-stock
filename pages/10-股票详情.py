@@ -355,7 +355,21 @@ _AI_SUMMARY_CACHE = {}
 def get_cache_key(prefix: str, data: dict, prompt_template: str) -> str:
     """生成缓存 key"""
     import hashlib
-    key_data = f"{prefix}_{data.get('ts_code', '')}_{hashlib.md5(prompt_template.encode()).hexdigest()[:8]}"
+    # 包含 ts_code 和 data_hash（如果有）来确保唯一性
+    ts_code = data.get('ts_code', '')
+    data_hash = data.get('data_hash', '')
+    holders_hash = data.get('holders_hash', '')
+    rewards_hash = data.get('rewards_hash', '')
+    
+    key_parts = [prefix, ts_code]
+    if data_hash:
+        key_parts.append(data_hash)
+    if holders_hash:
+        key_parts.append(holders_hash)
+    if rewards_hash:
+        key_parts.append(rewards_hash)
+    
+    key_data = f"{'_'.join(key_parts)}_{hashlib.md5(prompt_template.encode()).hexdigest()[:8]}"
     return key_data
 
 
