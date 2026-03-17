@@ -8,8 +8,6 @@ import pandas as pd
 import numpy as np
 import datetime
 import akshare as ak
-import mplfinance as mpf
-import matplotlib.dates as mdates
 import requests
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
@@ -147,6 +145,66 @@ def get_ak_price_df(code, end_date=None, count=60):
 
 
 @st.cache_data(ttl='0.5d')
+def get_tushare_weekly_df(code, end_date=None, count=60):
+    """使用tushare获取股票周K线数据"""
+    if end_date is None:
+        end_date = datetime.datetime.now().strftime('%Y%m%d')
+
+    ts_code = _convert_to_ts_code(code)
+    pro = _get_ts_client()
+
+    # 周线需要更多天数来获取足够的数据
+    end_dt = datetime.datetime.strptime(end_date, '%Y%m%d')
+    start_dt = end_dt - datetime.timedelta(days=max(count * 10, 500))
+    start_date = start_dt.strftime('%Y%m%d')
+
+    df = pro.weekly(ts_code=ts_code, start_date=start_date, end_date=end_date)
+    if df is None or df.empty:
+        raise ValueError(f"Tushare未返回 {ts_code} 的周线数据")
+
+    df = df.sort_values('trade_date')
+    if len(df) > count:
+        df = df.tail(count)
+
+    df = df[['trade_date', 'open', 'close', 'high', 'low', 'vol']].copy()
+    df.rename(columns={'trade_date': 'date', 'vol': 'volume'}, inplace=True)
+    df['volume'] = df['volume'] * 100  # tushare单位为手，换算为股
+    df['date'] = pd.to_datetime(df['date'])
+    df.set_index('date', inplace=True)
+    return df
+
+
+@st.cache_data(ttl='0.5d')
+def get_tushare_monthly_df(code, end_date=None, count=60):
+    """使用tushare获取股票月K线数据"""
+    if end_date is None:
+        end_date = datetime.datetime.now().strftime('%Y%m%d')
+
+    ts_code = _convert_to_ts_code(code)
+    pro = _get_ts_client()
+
+    # 月线需要更多天数来获取足够的数据
+    end_dt = datetime.datetime.strptime(end_date, '%Y%m%d')
+    start_dt = end_dt - datetime.timedelta(days=max(count * 35, 1200))
+    start_date = start_dt.strftime('%Y%m%d')
+
+    df = pro.monthly(ts_code=ts_code, start_date=start_date, end_date=end_date)
+    if df is None or df.empty:
+        raise ValueError(f"Tushare未返回 {ts_code} 的月线数据")
+
+    df = df.sort_values('trade_date')
+    if len(df) > count:
+        df = df.tail(count)
+
+    df = df[['trade_date', 'open', 'close', 'high', 'low', 'vol']].copy()
+    df.rename(columns={'trade_date': 'date', 'vol': 'volume'}, inplace=True)
+    df['volume'] = df['volume'] * 100  # tushare单位为手，换算为股
+    df['date'] = pd.to_datetime(df['date'])
+    df.set_index('date', inplace=True)
+    return df
+
+
+@st.cache_data(ttl='0.5d')
 def get_ak_interval_price_df(code, end_date=None, count=241):
     """获取股票分时数据（带重试机制）"""
     if end_date is None:
@@ -166,7 +224,11 @@ def get_ak_interval_price_df(code, end_date=None, count=241):
 
 
 def plotK(df, k='d', plot_type='candle', ma_line=None, fail_zt=False, container=st, highlight_date=None):
-    """绘制K线图"""
+    """绘制K线图（Plotly版本）"""
+    import plotly.graph_objects as go
+    from plotly.subplots import make_subplots
+    
+    # 处理周/月线重采样
     if k == 'w':
         df = df.resample('W').agg({
             'open': 'first', 
@@ -183,58 +245,164 @@ def plotK(df, k='d', plot_type='candle', ma_line=None, fail_zt=False, container=
             'close': 'last',
             'volume': 'sum'
         })
-
+    
+    # 重置索引以获取日期
+    df = df.reset_index()
+    
+    # 设置颜色方案
     if fail_zt:
-        mc = mpf.make_marketcolors(up='black', down='darkgray', inherit=True)
+        up_color = 'black'
+        down_color = 'darkgray'
     else:
-        mc = mpf.make_marketcolors(up='r', down='g', inherit=True)
-    s = mpf.make_mpf_style(marketcolors=mc, gridaxis='horizontal', gridstyle='dashed')
-    plot_args = {
-        'type': plot_type,
-        'style': s,
-        'volume': True,
-        'returnfig': True
-    }
-    if ma_line is not None: 
-        # 如果提供了自定义均线参数，使用提供的参数
-        plot_args['mav'] = ma_line
+        up_color = '#ff4d4f'  # 红色（上涨）
+        down_color = '#52c41a'  # 绿色（下跌）
+    
+    # 计算均线
+    if ma_line is not None:
+        ma_periods = ma_line if isinstance(ma_line, (list, tuple)) else (ma_line,)
     else:
-        # 默认显示5、10、20日均线
-        plot_args['mav'] = (5, 10, 20, 60, 144, 250)
-
-    # 处理标注日期（仅用于箭头，不再画竖线）
+        ma_periods = (5, 10, 20, 60, 144, 250)
+    
+    for period in ma_periods:
+        if len(df) >= period:
+            df[f'MA{period}'] = df['close'].rolling(window=period, min_periods=1).mean()
+    
+    # 创建子图（K线+成交量）
+    fig = make_subplots(
+        rows=2, 
+        cols=1, 
+        shared_xaxes=True,
+        vertical_spacing=0.02,
+        row_heights=[0.75, 0.25]
+    )
+    
+    # 添加K线图
+    if plot_type == 'candle':
+        fig.add_trace(
+            go.Candlestick(
+                x=df['date'],
+                open=df['open'],
+                high=df['high'],
+                low=df['low'],
+                close=df['close'],
+                name='K线',
+                increasing_line_color=up_color,
+                increasing_fillcolor=up_color,
+                decreasing_line_color=down_color,
+                decreasing_fillcolor=down_color,
+                line=dict(width=1)
+            ),
+            row=1, col=1
+        )
+    else:  # line
+        fig.add_trace(
+            go.Scatter(
+                x=df['date'],
+                y=df['close'],
+                mode='lines',
+                name='收盘价',
+                line=dict(color=up_color, width=1.5)
+            ),
+            row=1, col=1
+        )
+    
+    # 添加均线
+    colors = ['#5470c6', '#91cc75', '#fac858', '#ee6666', '#73c0de', '#3ba272']
+    for i, period in enumerate(ma_periods):
+        col_name = f'MA{period}'
+        if col_name in df.columns:
+            fig.add_trace(
+                go.Scatter(
+                    x=df['date'],
+                    y=df[col_name],
+                    mode='lines',
+                    name=f'MA{period}',
+                    line=dict(color=colors[i % len(colors)], width=1.5),
+                    showlegend=True
+                ),
+                row=1, col=1
+            )
+    
+    # 计算涨跌颜色
+    df['price_change'] = df['close'] - df['open']
+    df['volume_color'] = df['price_change'].apply(lambda x: up_color if x >= 0 else down_color)
+    
+    # 添加成交量
+    fig.add_trace(
+        go.Bar(
+            x=df['date'],
+            y=df['volume'],
+            name='成交量',
+            marker_color=df['volume_color'],
+            showlegend=False,
+            opacity=0.7
+        ),
+        row=2, col=1
+    )
+    
+    # 处理标注日期（添加红色箭头）
     if highlight_date is not None:
         if isinstance(highlight_date, str):
             highlight_date = pd.to_datetime(highlight_date)
         elif isinstance(highlight_date, datetime.datetime):
             highlight_date = pd.to_datetime(highlight_date)
-
-    fig, axe = mpf.plot(df, **plot_args)
-
-    # 如果有标注日期，添加红色上箭头，标在当日 K 线下方
-    if highlight_date is not None and highlight_date in df.index:
-        ax = axe[0]  # 主图
-        candle_low = float(df.loc[highlight_date, 'low'])
-        x_val = mdates.date2num(pd.to_datetime(highlight_date))
-        # 用实心短箭头从下指向当日最低价，避免错位
-        ax.annotate(
-            '',
-            xy=(x_val, candle_low),
-            xytext=(x_val, candle_low * 0.93),
-            xycoords=('data', 'data'),
-            arrowprops=dict(
-                arrowstyle='simple',
-                color='red',
-                lw=0,
-                alpha=0.9,
-                shrinkA=0,
-                shrinkB=0,
-            ),
-            annotation_clip=True,
-            zorder=6,
-        )
-
-    container.pyplot(fig)
+        
+        if highlight_date in df['date'].values:
+            row_data = df[df['date'] == highlight_date].iloc[0]
+            low_price = row_data['low']
+            
+            # 添加红色箭头标记
+            fig.add_trace(
+                go.Scatter(
+                    x=[highlight_date],
+                    y=[low_price],
+                    mode='markers+text',
+                    marker=dict(
+                        symbol='arrow-up',
+                        size=20,
+                        color='red',
+                        line=dict(width=1, color='darkred')
+                    ),
+                    text=[''],
+                    showlegend=False,
+                    hovertemplate='标注日期<br>最低价: %{y:.2f}<extra></extra>'
+                ),
+                row=1, col=1
+            )
+    
+    # 更新布局
+    fig.update_layout(
+        title='',
+        xaxis_title='',
+        yaxis_title='价格',
+        xaxis_rangeslider_visible=False,
+        hovermode='x unified',
+        showlegend=True,
+        legend=dict(
+            orientation='h',
+            yanchor='bottom',
+            y=1.02,
+            xanchor='right',
+            x=1,
+            font=dict(size=10)
+        ),
+        margin=dict(l=40, r=40, t=60, b=40),
+        height=500,
+        template='plotly_white',
+        dragmode='pan'
+    )
+    
+    # 更新y轴标题
+    fig.update_yaxes(title_text='价格', row=1, col=1)
+    fig.update_yaxes(title_text='成交量', row=2, col=1)
+    
+    # 更新x轴
+    fig.update_xaxes(showgrid=True, gridwidth=1, gridcolor='lightgray', row=1, col=1)
+    fig.update_xaxes(showgrid=True, gridwidth=1, gridcolor='lightgray', row=2, col=1)
+    fig.update_yaxes(showgrid=True, gridwidth=1, gridcolor='lightgray', row=1, col=1)
+    fig.update_yaxes(showgrid=True, gridwidth=1, gridcolor='lightgray', row=2, col=1)
+    
+    container.plotly_chart(fig, use_container_width=True, config={'scrollZoom': True})
 
 
 class PriceData:
