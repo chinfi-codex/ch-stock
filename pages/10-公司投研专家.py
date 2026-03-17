@@ -1,8 +1,159 @@
 """
-股票详情页面
+公司投研专家页面
 - 左侧2/3：信息面板（公司概况、财务指标、主营构成、股东管理层、市场数据、机构调研）
 - 右侧1/3：K线图（日/周/月）
 """
+
+import streamlit as st
+
+# =============================================================================
+# AI Prompt 配置（可在侧边栏自定义）
+# =============================================================================
+DEFAULT_PROMPTS = {
+    "company_basic": """你是一位专业的投资分析师，请根据以下公司信息生成一段简洁的总结（80-120字）：
+
+{text}
+
+请涵盖：
+1. 主营业务和行业地位
+2. 核心竞争力或特色
+3. 潜在关注点
+
+要求：简洁专业，突出投资亮点和风险。""",
+
+    "financial": """你是一位资深财务分析师，请对以下原始财务数据进行深度质量评估和异常巡查。
+
+原始财务数据：
+{text}
+
+请从以下维度进行专业分析（150-200字）：
+
+1. **盈利质量分析**
+   - 扣非净利润与净利润的差异（是否存在非经常性损益粉饰）
+   - 毛利率、净利率的稳定性和趋势
+   - 利润含金量（经营现金流与净利润匹配度）
+
+2. **资产负债健康度**
+   - 资产负债率水平和变化趋势
+   - 流动比率、速动比率反映的短期偿债能力
+   - 有息负债比例和财务杠杆风险
+
+3. **营运效率评估**
+   - 应收账款周转、存货周转效率
+   - 总资产周转率趋势
+   - 是否存在资产周转放缓风险
+
+4. **异常信号巡查**
+   - 收入与利润增长是否匹配
+   - 是否存在季节性或周期性异常波动
+   - 关键财务指标的突变点和可能原因
+   - 潜在的财务粉饰或风险信号
+
+要求：
+- 不要简单罗列数据，重在分析质量、趋势和异常
+- 指出具体的财务风险点和需关注的指标
+- 语言专业简洁，突出核心判断""",
+
+    "shareholders": """请根据以下股东和管理层数据，生成一段简洁的股权结构分析总结（150-200字）：
+
+{text}
+
+请重点分析：
+1. **主要股东**：前3大股东是谁？持股性质（国有/民营/机构）？
+2. **大股东占比**：前5大、前10大股东合计持股比例？股权集中度如何？
+3. **社保基金**：是否有社保基金持股？如有，持股比例多少？
+4. **管理层持股**：管理层合计持股数量及占总股本比例？激励机制如何？
+
+要求：
+- 数据要准确，提及具体股东名称和持股比例
+- 分析股权结构稳定性和治理风险
+- 语言简洁专业，适合投资者快速了解股权结构""",
+
+    "research": """你是一位专业的投资分析师，请根据以下机构调研信息进行简要分析（60-100字）：
+
+调研日期：{date}
+调研标题：{title}
+PDF链接：{pdf_url}
+
+请分析：
+1. 调研的主要目的或背景（如新产品、业绩说明、战略规划等）
+2. 可能涉及的核心关注点
+3. 对投资者的参考价值
+
+要求：简洁专业，突出投资要点，不要复述标题字面意思，重在解读背后的投资逻辑。""",
+
+    "technical": """你是一位资深股票技术分析师，请根据以下K线数据进行专业技术分析。
+
+【股票】{stock_name}
+
+【最新价格数据】
+当前价：{current_price:.2f}元
+今日涨跌：{change_pct:+.2f}%
+今日振幅：{amplitude:.2f}%
+
+【均线系统】
+MA5：{ma5:.2f}元 {ma5_signal}
+MA10：{ma10:.2f}元 {ma10_signal}
+MA20：{ma20:.2f}元 {ma20_signal}
+{ma60_line}
+均线排列：{ma_alignment}
+
+【MACD指标】
+DIF：{macd:.3f}
+DEA：{signal:.3f}
+MACD柱：{histogram:.3f}
+信号：{macd_signal}
+
+【RSI(14)】
+当前值：{rsi:.2f}
+状态：{rsi_status}
+
+【KDJ(9,3,3)】
+K：{k:.2f}
+D：{d:.2f}
+J：{j:.2f}
+信号：{kdj_signal}
+
+【近期K线数据（最近60个交易日）】
+{klines}
+
+请提供以下技术分析（简洁专业，200-300字）：
+
+1. **趋势分析**：当前处于什么趋势？均线系统给出什么信号？
+
+2. **技术指标研判**：
+   - MACD、RSI、KDJ是否共振？
+   - 是否有超买/超卖信号？
+   - 是否有金叉/死叉信号？
+
+3. **形态识别**：
+   - 是否形成头肩顶/底、双顶/底、三角形等经典形态？
+   - 关键支撑/阻力位在哪里？
+
+4. **技术面综合判断**：
+   - 多空力量对比
+   - 短期操作策略建议（看多/看空/观望）
+   - 关键价位（止损/止盈参考）
+
+要求：
+- 基于上述数据客观分析
+- 给出明确的操作倾向
+- 风险提示必不可少"""
+}
+
+# 初始化session_state中的prompt配置
+for key, default_value in DEFAULT_PROMPTS.items():
+    if f"prompt_{key}" not in st.session_state:
+        st.session_state[f"prompt_{key}"] = default_value
+
+def get_prompt(key: str) -> str:
+    """获取当前配置的prompt"""
+    return st.session_state.get(f"prompt_{key}", DEFAULT_PROMPTS.get(key, ""))
+
+def reset_prompts():
+    """重置所有prompt为默认值"""
+    for key in DEFAULT_PROMPTS:
+        st.session_state[f"prompt_{key}"] = DEFAULT_PROMPTS[key]
 
 import streamlit as st
 import pandas as pd
@@ -14,6 +165,7 @@ import os
 import akshare as ak
 from tools.utils import get_tushare_token, convert_to_ts_code, convert_to_ak_code
 from tools.stock_data import get_ak_price_df, get_tushare_weekly_df, get_tushare_monthly_df, plotK
+from tools.ai_utils import call_kimi_print, clean_ai_output, ai_summarize_cached
 from tools.crawlers import cninfo_announcement_spider, get_cninfo_orgid
 
 
@@ -347,11 +499,8 @@ def get_institute_research(code, start_date=None, end_date=None, limit=100):
 
 
 # =============================================================================
-# AI 总结缓存管理
+# 缓存辅助函数
 # =============================================================================
-_AI_RAW_CACHE = {}
-_AI_SUMMARY_CACHE = {}
-
 def get_cache_key(prefix: str, data: dict, prompt_template: str) -> str:
     """生成缓存 key"""
     import hashlib
@@ -389,154 +538,15 @@ def get_dataframe_hash(df: pd.DataFrame) -> str:
         return f"{len(df)}_{'_'.join(df.columns[:5])}"
 
 
-def call_kimi_print(prompt: str, cache_key: str) -> str:
-    """调用 kimi-cli --print 模式，缓存原始返回数据"""
-    global _AI_RAW_CACHE
-    
-    if cache_key in _AI_RAW_CACHE:
-        return _AI_RAW_CACHE[cache_key]
-    
-    try:
-        # 首先检查 kimi 命令是否可用
-        import shutil
-        kimi_path = shutil.which("kimi")
-        if kimi_path is None:
-            return "AI分析暂时不可用 (kimi-cli 未安装)"
-        
-        # 设置环境变量解决 Windows 编码问题
-        env = os.environ.copy()
-        env['PYTHONIOENCODING'] = 'utf-8'
-        env['KIMI_OUTPUT_ENCODING'] = 'utf-8'
-        
-        result = subprocess.run(
-            ["kimi", "--print", "--final-message-only", "--output-format", "text"],
-            input=prompt,
-            capture_output=True,
-            text=True,
-            encoding='utf-8',
-            errors='ignore',
-            timeout=60,
-            env=env
-        )
-        if result.returncode == 0:
-            raw_output = result.stdout.strip()
-            _AI_RAW_CACHE[cache_key] = raw_output
-            return raw_output
-        else:
-            # 记录错误信息以便调试
-            error_msg = result.stderr.strip() if result.stderr else f"退出码: {result.returncode}"
-            print(f"kimi-cli 执行失败: {error_msg}")
-            return f"AI分析暂时不可用"
-    except subprocess.TimeoutExpired:
-        return "AI分析暂时不可用 (请求超时)"
-    except Exception as e:
-        print(f"kimi-cli 调用异常: {str(e)}")
-        return "AI分析暂时不可用"
-
-
-def ai_summarize(text: str, prompt_template: str, cache_key: str) -> str:
-    """AI 总结主函数"""
-    global _AI_SUMMARY_CACHE
-    
-    if cache_key in _AI_SUMMARY_CACHE:
-        return _AI_SUMMARY_CACHE[cache_key]
-    
-    raw_result = call_kimi_print(prompt_template.format(text=text), cache_key)
-    
-    cleaned = raw_result
-    
-    # 1. 移除 think 标签
-    for prefix in ["<think>", "</think>", "<thinking>", "</thinking>"]:
-        cleaned = cleaned.replace(prefix, "")
-    
-    # 2. 提取 TextPart 内容（新的 kimi-cli 格式）
-    # 查找 TextPart 中的 text 内容
-    import re
-    text_match = re.search(r"TextPart\([^)]*text='([^']*)'", cleaned, re.DOTALL)
-    if text_match:
-        cleaned = text_match.group(1)
-    
-    # 3. 移除所有内部格式标签行
-    lines = cleaned.split('\n')
-    filtered_lines = []
-    for line in lines:
-        line = line.strip()
-        # 跳过内部格式标签行
-        if any(tag in line for tag in [
-            'TurnBegin(', 'StepBegin(', 'ThinkPart(', 'TextPart(',
-            'StatusUpdate(', 'TurnEnd()', 'StepEnd()', 'context_usage=',
-            'token_usage=', 'message_id=', 'context_tokens=',
-            'type=\'think\'', "type='text'", 'encrypted='
-        ]):
-            continue
-        filtered_lines.append(line)
-    
-    cleaned = '\n'.join(filtered_lines).strip()
-    
-    # 4. 移除剩余的转义字符
-    cleaned = cleaned.replace("\\n", "\n")
-    cleaned = cleaned.replace("\\'", "'")
-    
-    _AI_SUMMARY_CACHE[cache_key] = cleaned
-    return cleaned
-
-
 def ai_summarize_research(title: str, date: str, pdf_url: str) -> str:
     """AI 总结机构调研报告"""
+    # 使用配置的prompt模板
+    prompt_template = get_prompt("research")
+    prompt = prompt_template.format(date=date, title=title, pdf_url=pdf_url)
+    
     cache_key = f"research_{date}_{hash(title) % 10000}"
-    
-    if cache_key in _AI_SUMMARY_CACHE:
-        return _AI_SUMMARY_CACHE[cache_key]
-    
-    # 构建提示词
-    prompt = f"""你是一位专业的投资分析师，请根据以下机构调研信息进行简要分析（60-100字）：
-
-调研日期：{date}
-调研标题：{title}
-PDF链接：{pdf_url}
-
-请分析：
-1. 调研的主要目的或背景（如新产品、业绩说明、战略规划等）
-2. 可能涉及的核心关注点
-3. 对投资者的参考价值
-
-要求：简洁专业，突出投资要点，不要复述标题字面意思，重在解读背后的投资逻辑。"""
-    
     raw_result = call_kimi_print(prompt, cache_key)
-    
-    # 清理结果
-    cleaned = raw_result
-    import re
-    
-    # 1. 移除 think 标签
-    for prefix in ["<think>", "</think>", "<thinking>", "</thinking>"]:
-        cleaned = cleaned.replace(prefix, "")
-    
-    # 2. 提取 TextPart 内容
-    text_match = re.search(r"TextPart\([^)]*text='([^']*)", cleaned, re.DOTALL)
-    if text_match:
-        cleaned = text_match.group(1)
-    
-    # 3. 移除内部格式标签行
-    lines = cleaned.split('\n')
-    filtered_lines = []
-    for line in lines:
-        line = line.strip()
-        if any(tag in line for tag in [
-            'TurnBegin(', 'StepBegin(', 'ThinkPart(', 'TextPart(',
-            'StatusUpdate(', 'TurnEnd()', 'StepEnd()', 'context_usage=',
-            'token_usage=', 'message_id=', 'context_tokens=',
-            "type='think'", "type='text'", 'encrypted='
-        ]):
-            continue
-        filtered_lines.append(line)
-    
-    cleaned = '\n'.join(filtered_lines).strip()
-    cleaned = cleaned.replace("\\n", "\n")
-    cleaned = cleaned.replace("\\'", "'")
-    
-    _AI_SUMMARY_CACHE[cache_key] = cleaned
-    return cleaned
+    return clean_ai_output(raw_result)
 
 
 # =============================================================================
@@ -544,16 +554,7 @@ PDF链接：{pdf_url}
 # =============================================================================
 def ai_summarize_company_basic(company_info: dict) -> str:
     """AI 总结：公司基本信息"""
-    prompt_template = """你是一位专业的投资分析师，请根据以下公司信息生成一段简洁的总结（80-120字）：
-
-{text}
-
-请涵盖：
-1. 主营业务和行业地位
-2. 核心竞争力或特色
-3. 潜在关注点
-
-要求：简洁专业，突出投资亮点和风险。"""
+    prompt_template = get_prompt("company_basic")
     
     text = f"""公司名称：{company_info.get('name', '-')}
 所属行业：{company_info.get('industry', '-')}
@@ -562,7 +563,7 @@ def ai_summarize_company_basic(company_info: dict) -> str:
 公司介绍：{company_info.get('introduction', '-')[:500]}..."""
     
     cache_key = get_cache_key("company", {'ts_code': company_info.get('ts_code', '')}, prompt_template)
-    return ai_summarize(text, prompt_template, cache_key)
+    return ai_summarize_cached(text, prompt_template, cache_key)
 
 
 def ai_analyze_financial_trend(fina_df: pd.DataFrame, ts_code: str = "") -> str:
@@ -570,38 +571,7 @@ def ai_analyze_financial_trend(fina_df: pd.DataFrame, ts_code: str = "") -> str:
     if fina_df is None or fina_df.empty:
         return "暂无财务数据可供分析"
     
-    prompt_template = """你是一位资深财务分析师，请对以下原始财务数据进行深度质量评估和异常巡查。
-
-原始财务数据：
-{text}
-
-请从以下维度进行专业分析（150-200字）：
-
-1. **盈利质量分析**
-   - 扣非净利润与净利润的差异（是否存在非经常性损益粉饰）
-   - 毛利率、净利率的稳定性和趋势
-   - 利润含金量（经营现金流与净利润匹配度）
-
-2. **资产负债健康度**
-   - 资产负债率水平和变化趋势
-   - 流动比率、速动比率反映的短期偿债能力
-   - 有息负债比例和财务杠杆风险
-
-3. **营运效率评估**
-   - 应收账款周转、存货周转效率
-   - 总资产周转率趋势
-   - 是否存在资产周转放缓风险
-
-4. **异常信号巡查**
-   - 收入与利润增长是否匹配
-   - 是否存在季节性或周期性异常波动
-   - 关键财务指标的突变点和可能原因
-   - 潜在的财务粉饰或风险信号
-
-要求：
-- 不要简单罗列数据，重在分析质量、趋势和异常
-- 指出具体的财务风险点和需关注的指标
-- 语言专业简洁，突出核心判断"""
+    prompt_template = get_prompt("financial")
     
     # 构建完整的原始财务数据文本
     fina_df = fina_df.sort_values("end_date", ascending=False).head(8)
@@ -646,26 +616,13 @@ def ai_analyze_financial_trend(fina_df: pd.DataFrame, ts_code: str = "") -> str:
         'periods': len(fina_df),
         'data_hash': data_hash
     }, prompt_template)
-    return ai_summarize(text, prompt_template, cache_key)
+    return ai_summarize_cached(text, prompt_template, cache_key)
 
 
 def ai_analyze_shareholders_and_managers(holders_df: pd.DataFrame, managers_df: pd.DataFrame, rewards_df: pd.DataFrame, ts_code: str = "") -> str:
     """AI 综合分析：十大股东和管理层"""
     
-    prompt_template = """请根据以下股东和管理层数据，生成一段简洁的股权结构分析总结（150-200字）：
-
-{text}
-
-请重点分析：
-1. **主要股东**：前3大股东是谁？持股性质（国有/民营/机构）？
-2. **大股东占比**：前5大、前10大股东合计持股比例？股权集中度如何？
-3. **社保基金**：是否有社保基金持股？如有，持股比例多少？
-4. **管理层持股**：管理层合计持股数量及占总股本比例？激励机制如何？
-
-要求：
-- 数据要准确，提及具体股东名称和持股比例
-- 分析股权结构稳定性和治理风险
-- 语言简洁专业，适合投资者快速了解股权结构"""
+    prompt_template = get_prompt("shareholders")
     
     # 构建分析文本
     text_lines = []
@@ -728,7 +685,91 @@ def ai_analyze_shareholders_and_managers(holders_df: pd.DataFrame, managers_df: 
                                'holders_hash': holders_hash,
                                'rewards_hash': rewards_hash}, 
                               prompt_template)
-    return ai_summarize(text, prompt_template, cache_key)
+    return ai_summarize_cached(text, prompt_template, cache_key)
+
+
+# =============================================================================
+# AI 技术分析函数
+# =============================================================================
+def ai_analyze_technical(df_daily, df_weekly, df_monthly, stock_name="") -> str:
+    """AI分析技术形态和指标 - 使用kimi print模式"""
+    if df_daily is None or df_daily.empty:
+        return "暂无数据可供技术分析"
+    
+    # 准备K线数据（取最近60个交易日）
+    df = df_daily.tail(60).copy()
+    
+    # 构建K线数据文本
+    klines = []
+    for idx, row in df.iterrows():
+        date_str = idx.strftime('%m-%d') if hasattr(idx, 'strftime') else str(idx)[:5]
+        klines.append(f"{date_str}: 开{row['open']:.2f} 高{row['high']:.2f} 低{row['low']:.2f} 收{row['close']:.2f} 量{row['volume']/10000:.1f}万")
+    
+    # 计算基础均线
+    ma5 = df['close'].rolling(5).mean().iloc[-1]
+    ma10 = df['close'].rolling(10).mean().iloc[-1]
+    ma20 = df['close'].rolling(20).mean().iloc[-1]
+    ma60 = df['close'].rolling(60).mean().iloc[-1] if len(df) >= 60 else None
+    
+    # 计算MACD
+    exp1 = df['close'].ewm(span=12, adjust=False).mean()
+    exp2 = df['close'].ewm(span=26, adjust=False).mean()
+    macd = exp1 - exp2
+    signal = macd.ewm(span=9, adjust=False).mean()
+    
+    # 计算RSI
+    delta = df['close'].diff()
+    gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
+    loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
+    rs = gain / loss
+    rsi = 100 - (100 / (1 + rs))
+    
+    # 计算KDJ
+    low_list = df['low'].rolling(window=9, min_periods=9).min()
+    high_list = df['high'].rolling(window=9, min_periods=9).max()
+    rsv = (df['close'] - low_list) / (high_list - low_list) * 100
+    k = rsv.ewm(com=2, adjust=False).mean()
+    d = k.ewm(com=2, adjust=False).mean()
+    j = 3 * k - 2 * d
+    
+    latest = df.iloc[-1]
+    prev = df.iloc[-2] if len(df) > 1 else latest
+    
+    # 准备技术指标数据
+    technical_data = {
+        'stock_name': stock_name,
+        'current_price': latest['close'],
+        'change_pct': (latest['close']/prev['close']-1)*100,
+        'amplitude': (latest['high']/latest['low']-1)*100,
+        'ma5': ma5,
+        'ma10': ma10,
+        'ma20': ma20,
+        'ma60': ma60 if ma60 else 0,
+        'ma5_signal': '↑' if latest['close'] > ma5 else '↓',
+        'ma10_signal': '↑' if latest['close'] > ma10 else '↓',
+        'ma20_signal': '↑' if latest['close'] > ma20 else '↓',
+        'ma60_line': f"MA60：{ma60:.2f}元 {'↑' if latest['close'] > ma60 else '↓'}" if ma60 else '',
+        'ma_alignment': '多头排列' if ma5 > ma10 > ma20 else '空头排列' if ma5 < ma10 < ma20 else '缠绕',
+        'macd': macd.iloc[-1],
+        'signal': signal.iloc[-1],
+        'histogram': (macd.iloc[-1] - signal.iloc[-1])*2,
+        'macd_signal': '金叉' if macd.iloc[-1] > signal.iloc[-1] and macd.iloc[-2] <= signal.iloc[-2] else '死叉' if macd.iloc[-1] < signal.iloc[-1] and macd.iloc[-2] >= signal.iloc[-2] else 'DIF在DEA上方' if macd.iloc[-1] > signal.iloc[-1] else 'DIF在DEA下方',
+        'rsi': rsi.iloc[-1],
+        'rsi_status': '超买(>70)' if rsi.iloc[-1] > 70 else '超卖(<30)' if rsi.iloc[-1] < 30 else '中性',
+        'k': k.iloc[-1],
+        'd': d.iloc[-1],
+        'j': j.iloc[-1],
+        'kdj_signal': '金叉' if k.iloc[-1] > d.iloc[-1] and k.iloc[-2] <= d.iloc[-2] else '死叉' if k.iloc[-1] < d.iloc[-1] and k.iloc[-2] >= d.iloc[-2] else 'K在D上方' if k.iloc[-1] > d.iloc[-1] else 'K在D下方',
+        'klines': '\n'.join(klines)
+    }
+    
+    # 使用配置的prompt模板
+    prompt_template = get_prompt("technical")
+    prompt = prompt_template.format(**technical_data)
+    
+    # 使用kimi print模式直接获取分析结果
+    cache_key = f"technical_{stock_name}_{hash(str(latest['close'])) % 100000}"
+    return call_kimi_print(prompt, cache_key)
 
 
 # =============================================================================
@@ -765,12 +806,12 @@ def format_percent(value):
 # =============================================================================
 def main():
     st.set_page_config(
-        page_title="股票详情",
+        page_title="公司投研专家",
         page_icon="📊",
         layout="wide",
     )
     
-    st.title("📊 股票详情查询")
+    st.title("📊 公司投研专家")
     
     # 检查 Tushare Token
     pro = get_tushare_pro()
@@ -778,6 +819,61 @@ def main():
         st.error("⚠️ 未配置 Tushare Token")
         st.info("在 .streamlit/secrets.toml 中添加：`tushare_token = '你的token'`")
         return
+    
+    # =============================================================================
+    # 侧边栏：AI Prompt 配置
+    # =============================================================================
+    with st.sidebar:
+        st.markdown("## 🤖 AI分析配置")
+        
+        # 使用expander来组织不同的prompt配置
+        with st.expander("📋 公司概况Prompt", expanded=False):
+            st.session_state["prompt_company_basic"] = st.text_area(
+                "公司概况分析Prompt",
+                value=st.session_state.get("prompt_company_basic", DEFAULT_PROMPTS["company_basic"]),
+                height=200,
+                key="config_company_basic"
+            )
+        
+        with st.expander("💰 财务分析Prompt", expanded=False):
+            st.session_state["prompt_financial"] = st.text_area(
+                "财务分析Prompt",
+                value=st.session_state.get("prompt_financial", DEFAULT_PROMPTS["financial"]),
+                height=300,
+                key="config_financial"
+            )
+        
+        with st.expander("👥 股东分析Prompt", expanded=False):
+            st.session_state["prompt_shareholders"] = st.text_area(
+                "股东分析Prompt",
+                value=st.session_state.get("prompt_shareholders", DEFAULT_PROMPTS["shareholders"]),
+                height=250,
+                key="config_shareholders"
+            )
+        
+        with st.expander("🏢 调研分析Prompt", expanded=False):
+            st.session_state["prompt_research"] = st.text_area(
+                "调研分析Prompt",
+                value=st.session_state.get("prompt_research", DEFAULT_PROMPTS["research"]),
+                height=200,
+                key="config_research"
+            )
+        
+        with st.expander("📈 技术分析Prompt", expanded=False):
+            st.text("可用变量: {stock_name}, {current_price}, {change_pct}, {amplitude}, {ma5}, {ma10}, {ma20}, {ma60}, {ma5_signal}, {ma10_signal}, {ma20_signal}, {ma60_line}, {ma_alignment}, {macd}, {signal}, {histogram}, {macd_signal}, {rsi}, {rsi_status}, {k}, {d}, {j}, {kdj_signal}, {klines}")
+            st.session_state["prompt_technical"] = st.text_area(
+                "技术分析Prompt",
+                value=st.session_state.get("prompt_technical", DEFAULT_PROMPTS["technical"]),
+                height=400,
+                key="config_technical"
+            )
+        
+        # 重置按钮
+        if st.button("🔄 重置为默认Prompt", use_container_width=True):
+            reset_prompts()
+            st.rerun()
+        
+        st.divider()
     
     # 初始化 session state
     if "search_query" not in st.session_state:
@@ -853,43 +949,58 @@ def main():
         # ========== 左右布局：左侧2/3信息，右侧1/3 K线 ==========
         left_col, right_col = st.columns([2, 1])
         
-        # ========== 右侧：K线图 ==========
+        # ========== 右侧：K线图（从上到下直接展示日、周、月） ==========
         with right_col:
-            st.markdown("##### 📈 K线走势")
-            
             code6 = ts_code.split(".")[0] if "." in ts_code else ts_code[:6]
             
-            kline_tabs = st.tabs(["日线", "周线", "月线"])
+            # 初始化数据变量
+            daily_df = None
+            weekly_df = None
+            monthly_df = None
             
-            with kline_tabs[0]:
-                # 日K - 200天
-                daily_df = get_ak_price_df(convert_to_ak_code(ts_code), count=200)
-                if daily_df is not None and not daily_df.empty:
-                    plotK(daily_df, k='d')
+            # 日K
+            st.markdown("**📈 日线（200日）**")
+            daily_df = get_ak_price_df(convert_to_ak_code(ts_code), count=200)
+            if daily_df is not None and not daily_df.empty:
+                plotK(daily_df, k='d')
+            else:
+                st.warning("暂无日K数据")
+            
+            st.markdown("---")
+            
+            # 周K
+            st.markdown("**📈 周线（56周）**")
+            try:
+                weekly_df = get_tushare_weekly_df(code6, count=56)
+                if weekly_df is not None and not weekly_df.empty:
+                    plotK(weekly_df, k='w')
                 else:
-                    st.warning("暂无日K数据")
+                    st.warning("暂无周K数据")
+            except Exception as e:
+                st.warning(f"周K数据获取失败")
             
-            with kline_tabs[1]:
-                # 周K - 使用Tushare
-                try:
-                    weekly_df = get_tushare_weekly_df(code6, count=56)
-                    if weekly_df is not None and not weekly_df.empty:
-                        plotK(weekly_df, k='w')
-                    else:
-                        st.warning("暂无周K数据")
-                except Exception as e:
-                    st.warning(f"周K数据获取失败: {e}")
+            st.markdown("---")
             
-            with kline_tabs[2]:
-                # 月K - 使用Tushare
+            # 月K
+            st.markdown("**📈 月线（20月）**")
+            try:
+                monthly_df = get_tushare_monthly_df(code6, count=20)
+                if monthly_df is not None and not monthly_df.empty:
+                    plotK(monthly_df, k='m')
+                else:
+                    st.warning("暂无月K数据")
+            except Exception as e:
+                st.warning(f"月K数据获取失败")
+            
+            # AI技术分析
+            st.markdown("---")
+            st.markdown("**🤖 AI技术分析**")
+            with st.spinner("正在进行技术分析..."):
                 try:
-                    monthly_df = get_tushare_monthly_df(code6, count=20)
-                    if monthly_df is not None and not monthly_df.empty:
-                        plotK(monthly_df, k='m')
-                    else:
-                        st.warning("暂无月K数据")
+                    technical_analysis = ai_analyze_technical(daily_df, weekly_df, monthly_df, stock_name)
+                    st.info(technical_analysis)
                 except Exception as e:
-                    st.warning(f"月K数据获取失败: {e}")
+                    st.warning("技术分析暂时不可用")
         
         # ========== 左侧：信息面板 ==========
         with left_col:

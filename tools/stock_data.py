@@ -14,6 +14,8 @@ from urllib3.util.retry import Retry
 import logging
 import os
 import tushare as ts
+import mplfinance as mpf
+import matplotlib.dates as mdates
 
 # 配置日志
 logging.basicConfig(level=logging.INFO,
@@ -223,186 +225,131 @@ def get_ak_interval_price_df(code, end_date=None, count=241):
     return df
 
 
-def plotK(df, k='d', plot_type='candle', ma_line=None, fail_zt=False, container=st, highlight_date=None):
-    """绘制K线图（Plotly版本）"""
-    import plotly.graph_objects as go
-    from plotly.subplots import make_subplots
+def calculate_macd(df, fast=12, slow=26, signal=9):
+    """
+    计算MACD指标
     
-    # 处理周/月线重采样
-    if k == 'w':
-        df = df.resample('W').agg({
-            'open': 'first', 
-            'high': 'max', 
-            'low': 'min', 
-            'close': 'last',
-            'volume': 'sum'
-        })
-    if k == 'm':
-        df = df.resample('M').agg({
-            'open': 'first', 
-            'high': 'max', 
-            'low': 'min', 
-            'close': 'last',
-            'volume': 'sum'
-        })
+    参数:
+        df: DataFrame with 'close' column
+        fast: 快线周期，默认12
+        slow: 慢线周期，默认26
+        signal: 信号线周期，默认9
     
-    # 重置索引以获取日期
-    df = df.reset_index()
+    返回:
+        DataFrame with 'macd', 'signal', 'histogram' columns
+    """
+    df = df.copy()
+    # 计算EMA
+    ema_fast = df['close'].ewm(span=fast, adjust=False).mean()
+    ema_slow = df['close'].ewm(span=slow, adjust=False).mean()
+    # DIF线
+    df['macd'] = ema_fast - ema_slow
+    # DEA信号线
+    df['signal'] = df['macd'].ewm(span=signal, adjust=False).mean()
+    # MACD柱状图
+    df['histogram'] = (df['macd'] - df['signal']) * 2
+    return df
+
+
+def plotK(df, k='d', plot_type='candle', ma_line=None, fail_zt=False, container=st, highlight_date=None, show_macd=True):
+    """绘制K线图
     
-    # 设置颜色方案
+    参数:
+        show_macd: 是否显示MACD指标，默认True
+    """
+    # 根据传入的数据频率决定是否需要进行resample
+    # 如果数据点很少（小于count的一半），说明已经是聚合后的周/月线数据，不再resample
+    if k == 'w' and len(df) > 0:
+        # 计算平均日期间隔，如果小于5天说明是日线数据，需要resample
+        avg_days = (df.index[-1] - df.index[0]).days / len(df) if len(df) > 1 else 0
+        if avg_days < 5:
+            df = df.resample('W').agg({
+                'open': 'first', 
+                'high': 'max', 
+                'low': 'min', 
+                'close': 'last',
+                'volume': 'sum'
+            })
+    if k == 'm' and len(df) > 0:
+        # 计算平均日期间隔，如果小于20天说明是日线数据，需要resample
+        avg_days = (df.index[-1] - df.index[0]).days / len(df) if len(df) > 1 else 0
+        if avg_days < 20:
+            df = df.resample('M').agg({
+                'open': 'first', 
+                'high': 'max', 
+                'low': 'min', 
+                'close': 'last',
+                'volume': 'sum'
+            })
+
+    # 计算MACD
+    if show_macd and 'close' in df.columns:
+        df = calculate_macd(df)
+
     if fail_zt:
-        up_color = 'black'
-        down_color = 'darkgray'
+        mc = mpf.make_marketcolors(up='black', down='darkgray', inherit=True)
     else:
-        up_color = '#ff4d4f'  # 红色（上涨）
-        down_color = '#52c41a'  # 绿色（下跌）
-    
-    # 计算均线
-    if ma_line is not None:
-        ma_periods = ma_line if isinstance(ma_line, (list, tuple)) else (ma_line,)
+        mc = mpf.make_marketcolors(up='r', down='g', inherit=True)
+    s = mpf.make_mpf_style(marketcolors=mc, gridaxis='horizontal', gridstyle='dashed')
+    plot_args = {
+        'type': plot_type,
+        'style': s,
+        'volume': True,
+        'returnfig': True
+    }
+    if ma_line is not None: 
+        # 如果提供了自定义均线参数，使用提供的参数
+        plot_args['mav'] = ma_line
     else:
-        ma_periods = (5, 10, 20, 60, 144, 250)
-    
-    for period in ma_periods:
-        if len(df) >= period:
-            df[f'MA{period}'] = df['close'].rolling(window=period, min_periods=1).mean()
-    
-    # 创建子图（K线+成交量）
-    fig = make_subplots(
-        rows=2, 
-        cols=1, 
-        shared_xaxes=True,
-        vertical_spacing=0.02,
-        row_heights=[0.75, 0.25]
-    )
-    
-    # 添加K线图
-    if plot_type == 'candle':
-        fig.add_trace(
-            go.Candlestick(
-                x=df['date'],
-                open=df['open'],
-                high=df['high'],
-                low=df['low'],
-                close=df['close'],
-                name='K线',
-                increasing_line_color=up_color,
-                increasing_fillcolor=up_color,
-                decreasing_line_color=down_color,
-                decreasing_fillcolor=down_color,
-                line=dict(width=1)
-            ),
-            row=1, col=1
-        )
-    else:  # line
-        fig.add_trace(
-            go.Scatter(
-                x=df['date'],
-                y=df['close'],
-                mode='lines',
-                name='收盘价',
-                line=dict(color=up_color, width=1.5)
-            ),
-            row=1, col=1
-        )
-    
-    # 添加均线
-    colors = ['#5470c6', '#91cc75', '#fac858', '#ee6666', '#73c0de', '#3ba272']
-    for i, period in enumerate(ma_periods):
-        col_name = f'MA{period}'
-        if col_name in df.columns:
-            fig.add_trace(
-                go.Scatter(
-                    x=df['date'],
-                    y=df[col_name],
-                    mode='lines',
-                    name=f'MA{period}',
-                    line=dict(color=colors[i % len(colors)], width=1.5),
-                    showlegend=True
-                ),
-                row=1, col=1
-            )
-    
-    # 计算涨跌颜色
-    df['price_change'] = df['close'] - df['open']
-    df['volume_color'] = df['price_change'].apply(lambda x: up_color if x >= 0 else down_color)
-    
-    # 添加成交量
-    fig.add_trace(
-        go.Bar(
-            x=df['date'],
-            y=df['volume'],
-            name='成交量',
-            marker_color=df['volume_color'],
-            showlegend=False,
-            opacity=0.7
-        ),
-        row=2, col=1
-    )
-    
-    # 处理标注日期（添加红色箭头）
+        # 默认显示5、10、20、60、144、250日均线
+        plot_args['mav'] = (5, 10, 20, 60, 144, 250)
+
+    # 准备MACD附加图
+    if show_macd and 'macd' in df.columns:
+        # MACD线和信号线
+        ap_macd = mpf.make_addplot(df['macd'], panel=2, color='blue', width=0.8, ylabel='MACD')
+        ap_signal = mpf.make_addplot(df['signal'], panel=2, color='orange', width=0.8)
+        # MACD柱状图
+        ap_hist = mpf.make_addplot(df['histogram'], panel=2, type='bar', 
+                                   color=['green' if h < 0 else 'red' for h in df['histogram']],
+                                   width=0.6)
+        plot_args['addplot'] = [ap_macd, ap_signal, ap_hist]
+        # 调整面板比例：主图:成交量:MACD = 3:1:1
+        plot_args['panel_ratios'] = (3, 1, 1)
+
+    # 处理标注日期（仅用于箭头，不再画竖线）
     if highlight_date is not None:
         if isinstance(highlight_date, str):
             highlight_date = pd.to_datetime(highlight_date)
         elif isinstance(highlight_date, datetime.datetime):
             highlight_date = pd.to_datetime(highlight_date)
-        
-        if highlight_date in df['date'].values:
-            row_data = df[df['date'] == highlight_date].iloc[0]
-            low_price = row_data['low']
-            
-            # 添加红色箭头标记
-            fig.add_trace(
-                go.Scatter(
-                    x=[highlight_date],
-                    y=[low_price],
-                    mode='markers+text',
-                    marker=dict(
-                        symbol='arrow-up',
-                        size=20,
-                        color='red',
-                        line=dict(width=1, color='darkred')
-                    ),
-                    text=[''],
-                    showlegend=False,
-                    hovertemplate='标注日期<br>最低价: %{y:.2f}<extra></extra>'
-                ),
-                row=1, col=1
-            )
-    
-    # 更新布局
-    fig.update_layout(
-        title='',
-        xaxis_title='',
-        yaxis_title='价格',
-        xaxis_rangeslider_visible=False,
-        hovermode='x unified',
-        showlegend=True,
-        legend=dict(
-            orientation='h',
-            yanchor='bottom',
-            y=1.02,
-            xanchor='right',
-            x=1,
-            font=dict(size=10)
-        ),
-        margin=dict(l=40, r=40, t=60, b=40),
-        height=500,
-        template='plotly_white',
-        dragmode='pan'
-    )
-    
-    # 更新y轴标题
-    fig.update_yaxes(title_text='价格', row=1, col=1)
-    fig.update_yaxes(title_text='成交量', row=2, col=1)
-    
-    # 更新x轴
-    fig.update_xaxes(showgrid=True, gridwidth=1, gridcolor='lightgray', row=1, col=1)
-    fig.update_xaxes(showgrid=True, gridwidth=1, gridcolor='lightgray', row=2, col=1)
-    fig.update_yaxes(showgrid=True, gridwidth=1, gridcolor='lightgray', row=1, col=1)
-    fig.update_yaxes(showgrid=True, gridwidth=1, gridcolor='lightgray', row=2, col=1)
-    
-    container.plotly_chart(fig, use_container_width=True, config={'scrollZoom': True})
+
+    fig, axe = mpf.plot(df, **plot_args)
+
+    # 如果有标注日期，添加红色上箭头，标在当日 K 线下方
+    if highlight_date is not None and highlight_date in df.index:
+        ax = axe[0]  # 主图
+        candle_low = float(df.loc[highlight_date, 'low'])
+        x_val = mdates.date2num(pd.to_datetime(highlight_date))
+        # 用实心短箭头从下指向当日最低价，避免错位
+        ax.annotate(
+            '',
+            xy=(x_val, candle_low),
+            xytext=(x_val, candle_low * 0.93),
+            xycoords=('data', 'data'),
+            arrowprops=dict(
+                arrowstyle='simple',
+                color='red',
+                lw=0,
+                alpha=0.9,
+                shrinkA=0,
+                shrinkB=0,
+            ),
+            annotation_clip=True,
+            zorder=6,
+        )
+
+    container.pyplot(fig)
 
 
 class PriceData:
