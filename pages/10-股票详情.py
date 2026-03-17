@@ -431,7 +431,7 @@ def call_kimi_print(prompt: str, cache_key: str) -> str:
         return "AI分析暂时不可用 (请求超时)"
     except Exception as e:
         print(f"kimi-cli 调用异常: {str(e)}")
-        return f"AI分析暂时不可用""
+        return "AI分析暂时不可用"
 
 
 def ai_summarize(text: str, prompt_template: str, cache_key: str) -> str:
