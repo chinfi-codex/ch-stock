@@ -359,6 +359,22 @@ def get_cache_key(prefix: str, data: dict, prompt_template: str) -> str:
     return key_data
 
 
+def get_dataframe_hash(df: pd.DataFrame) -> str:
+    """计算 DataFrame 的 hash 值，用于缓存 key"""
+    import hashlib
+    if df is None or df.empty:
+        return "empty"
+    # 使用 DataFrame 的前100行和关键列计算 hash
+    df_sample = df.head(100)
+    try:
+        # 将 DataFrame 转换为 bytes 并计算 hash
+        df_bytes = df_sample.to_csv(index=False).encode('utf-8')
+        return hashlib.md5(df_bytes).hexdigest()[:16]
+    except Exception:
+        # 如果失败，使用行数和列名的组合
+        return f"{len(df)}_{'_'.join(df.columns[:5])}"
+
+
 def call_kimi_print(prompt: str, cache_key: str) -> str:
     """调用 kimi-cli --print 模式，缓存原始返回数据"""
     global _AI_RAW_CACHE
@@ -535,7 +551,7 @@ def ai_summarize_company_basic(company_info: dict) -> str:
     return ai_summarize(text, prompt_template, cache_key)
 
 
-def ai_analyze_financial_trend(fina_df: pd.DataFrame) -> str:
+def ai_analyze_financial_trend(fina_df: pd.DataFrame, ts_code: str = "") -> str:
     """AI 分析：财务质量评估和异常巡查"""
     if fina_df is None or fina_df.empty:
         return "暂无财务数据可供分析"
@@ -609,11 +625,17 @@ def ai_analyze_financial_trend(fina_df: pd.DataFrame) -> str:
     
     text = "\n".join(text_lines)
     
-    cache_key = get_cache_key("fin_trend", {'periods': len(fina_df)}, prompt_template)
+    # 生成包含股票代码和数据 hash 的缓存 key，避免不同股票数据串台
+    data_hash = get_dataframe_hash(fina_df)
+    cache_key = get_cache_key("fin_trend", {
+        'ts_code': ts_code,
+        'periods': len(fina_df),
+        'data_hash': data_hash
+    }, prompt_template)
     return ai_summarize(text, prompt_template, cache_key)
 
 
-def ai_analyze_shareholders_and_managers(holders_df: pd.DataFrame, managers_df: pd.DataFrame, rewards_df: pd.DataFrame) -> str:
+def ai_analyze_shareholders_and_managers(holders_df: pd.DataFrame, managers_df: pd.DataFrame, rewards_df: pd.DataFrame, ts_code: str = "") -> str:
     """AI 综合分析：十大股东和管理层"""
     
     prompt_template = """请根据以下股东和管理层数据，生成一段简洁的股权结构分析总结（150-200字）：
@@ -684,9 +706,13 @@ def ai_analyze_shareholders_and_managers(holders_df: pd.DataFrame, managers_df: 
     
     text = "\n".join(text_lines) if text_lines else "暂无股东及管理层数据"
     
+    # 生成包含股票代码和数据 hash 的缓存 key，避免不同股票数据串台
+    holders_hash = get_dataframe_hash(holders_df)
+    rewards_hash = get_dataframe_hash(rewards_df)
     cache_key = get_cache_key("shareholders_managers", 
-                              {'holders_count': len(holders_df) if holders_df is not None else 0,
-                               'mgmt_count': len(rewards_df) if rewards_df is not None else 0}, 
+                              {'ts_code': ts_code,
+                               'holders_hash': holders_hash,
+                               'rewards_hash': rewards_hash}, 
                               prompt_template)
     return ai_summarize(text, prompt_template, cache_key)
 
@@ -955,7 +981,7 @@ def main():
                     
                     # AI分析财务趋势
                     with st.spinner("正在分析财务数据..."):
-                        financial_summary = ai_analyze_financial_trend(fina_df)
+                        financial_summary = ai_analyze_financial_trend(fina_df, ts_code)
                     st.info(financial_summary)
                 else:
                     st.warning("暂无财务指标数据")
@@ -1061,7 +1087,7 @@ def main():
                 
                 if (holders_df is not None and not holders_df.empty) or (managers_df is not None and not managers_df.empty) or (rewards_df is not None and not rewards_df.empty):
                     with st.spinner("正在分析股东与管理层..."):
-                        shareholder_manager_summary = ai_analyze_shareholders_and_managers(holders_df, managers_df, rewards_df)
+                        shareholder_manager_summary = ai_analyze_shareholders_and_managers(holders_df, managers_df, rewards_df, ts_code)
                     st.info(shareholder_manager_summary)
                 else:
                     st.warning("暂无股东及管理层数据")
