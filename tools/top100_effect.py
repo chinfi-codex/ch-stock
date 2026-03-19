@@ -483,48 +483,8 @@ def compute_top100_profit_effect(trade_date: date, require_newhigh_volume: bool 
 
 @st.cache_data(ttl="30m", show_spinner=False)
 def fetch_top100_layered_features_by_date(limit_days: int = 20) -> pd.DataFrame:
-    try:
-        from database.db_manager import get_db
-    except Exception:
-        return pd.DataFrame()
-
-    try:
-        safe_limit = max(1, min(int(limit_days), 250))
-    except Exception:
-        safe_limit = 20
-
-    sql = f"""
-        SELECT
-            trade_date,
-            turnover_lt_5e8,
-            turnover_5e8_to_50,
-            turnover_50e8_to_90,
-            turnover_gt_90e8,
-            mktcap_lt_5e9,
-            mktcap_5e9_to_10,
-            mktcap_10e9_to_20,
-            mktcap_20e9_to_50,
-            mktcap_gt_50e9,
-            board_main,
-            board_gem,
-            board_star
-        FROM gainer_feature_summary
-        ORDER BY trade_date DESC
-        LIMIT {safe_limit}
     """
-
-    try:
-        with get_db() as db:
-            rows = db.query(sql)
-    except Exception:
-        return pd.DataFrame()
-
-    if not rows:
-        return pd.DataFrame()
-
-    df = pd.DataFrame(rows)
-    if "trade_date" in df.columns:
-        df["trade_date"] = pd.to_datetime(df["trade_date"], errors="coerce")
-        df = df.dropna(subset=["trade_date"]).sort_values("trade_date", ascending=False)
-        df["trade_date"] = df["trade_date"].dt.strftime("%Y-%m-%d")
-    return df.reset_index(drop=True)
+    获取Top100分层特征历史数据。
+    返回空DataFrame（MySQL已移除）。
+    """
+    return pd.DataFrame()

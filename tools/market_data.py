@@ -12,6 +12,9 @@ from datetime import datetime, date
 import tushare as ts
 from .utils import get_stock_list, get_tushare_token
 
+# Backward-compatible alias used in older call sites in this module.
+_get_tushare_token = get_tushare_token
+
 
 def _get_index_amount(index_df, stat_date: str) -> float:
     if index_df is None or index_df.empty:
@@ -92,63 +95,6 @@ def _find_market_item_value(market_data: pd.DataFrame, keywords):
             return r.get("value")
     return None
 
-
-def _sync_market_activity_to_mysql(stat_date, market_data, total_amount):
-    """
-    同步市场数据到 MySQL market_activity_daily。
-    失败时只打印日志，不影响主流程。
-    """
-    try:
-        from database.db_manager import get_db
-    except Exception as e:
-        print(f"MySQL模块加载失败: {e}")
-        return
-
-    trade_date = pd.to_datetime(stat_date, errors="coerce")
-    if pd.isna(trade_date):
-        print(f"MySQL同步跳过，无法解析日期: {stat_date}")
-        return
-    trade_date = trade_date.strftime("%Y-%m-%d")
-
-    up_raw = _find_market_item_value(market_data, ["上涨"])
-    down_raw = _find_market_item_value(market_data, ["下跌"])
-    zt_raw = _find_market_item_value(market_data, ["涨停"])
-    dt_raw = _find_market_item_value(market_data, ["跌停"])
-    activity_raw = _find_market_item_value(market_data, ["活跃", "情绪"])
-
-    payload = {}
-    if market_data is not None and not market_data.empty and {"item", "value"}.issubset(set(market_data.columns)):
-        for _, r in market_data.iterrows():
-            k = str(r.get("item", ""))
-            v = r.get("value")
-            if pd.isna(v):
-                payload[k] = None
-            else:
-                payload[k] = str(v)
-
-    # total_amount 来自 tushare daily.amount 汇总，保持与既有导入脚本一致：/1e8
-    total_amount_yi = None
-    try:
-        total_amount_yi = float(total_amount) / 1e8 if total_amount is not None else None
-    except Exception:
-        total_amount_yi = None
-
-    data = {
-        "trade_date": trade_date,
-        "up_count": _to_int(up_raw, 0),
-        "down_count": _to_int(down_raw, 0),
-        "zt_count": _to_int(zt_raw, 0),
-        "dt_count": _to_int(dt_raw, 0),
-        "activity_index": _to_float(activity_raw),
-        "total_amount": total_amount_yi,
-        "raw_payload": json.dumps(payload, ensure_ascii=False),
-    }
-
-    try:
-        with get_db() as db:
-            db.upsert("market_activity_daily", data, unique_keys=["trade_date"])
-    except Exception as e:
-        print(f"MySQL同步market_activity_daily失败: {e}")
 
 
 def _get_financing_net_buy(trade_date: str):
@@ -269,6 +215,7 @@ def get_gem_pe_series(days: int = 500) -> pd.DataFrame:
 # 使用 tools/utils.py 中的 get_tushare_token 函数
 
 
+@st.cache_data(ttl='1h')
 def get_market_data():
     """获取大盘数据：上证K，上涨家数、下跌家数、情绪指数"""
     def _fetch_index_kline(symbol: str, ts_code: str) -> pd.DataFrame:
@@ -334,37 +281,61 @@ def get_market_data():
         value = market_data.iloc[idx]['value']
         row[item] = value
 
-    # 使用 Tushare 全市场成交额作为量能口径（单位：千元）
+    # 使用 Tushare 计算市场数据（成交额、上涨家数、下跌家数）
     total_amount = 0.0
+    up_count = None
+    down_count = None
+    
     try:
         token = _get_tushare_token()
         if token:
             pro = ts.pro_api(token)
             trade_date = pd.to_datetime(stat_date).strftime("%Y%m%d")
-            daily = pro.daily(trade_date=trade_date, fields="ts_code,trade_date,amount")
-            if daily is not None and not daily.empty and "amount" in daily.columns:
-                total_amount = pd.to_numeric(daily["amount"], errors="coerce").sum()
+            
+            # 获取当日所有股票的日线数据（包含成交额和涨跌幅）
+            daily = pro.daily(trade_date=trade_date, fields="ts_code,trade_date,amount,pct_chg")
+            
+            if daily is not None and not daily.empty:
+                # 计算成交额（千元）
+                if "amount" in daily.columns:
+                    total_amount = pd.to_numeric(daily["amount"], errors="coerce").sum()
+                
+                # 计算上涨和下跌家数
+                if "pct_chg" in daily.columns:
+                    daily['pct_chg'] = pd.to_numeric(daily['pct_chg'], errors='coerce')
+                    up_count = int((daily['pct_chg'] > 0).sum())
+                    down_count = int((daily['pct_chg'] < 0).sum())
             else:
                 print(f"Tushare daily 返回空数据: trade_date={trade_date}")
         else:
-            print("未找到 TUSHARE_TOKEN，成交额将置为0")
+            print("未找到 TUSHARE_TOKEN，数据将置为0")
     except Exception as e:
-        print(f"获取成交额失败: {e}")
+        print(f"获取Tushare市场数据失败: {e}")
         total_amount = 0.0
 
     row['成交额'] = total_amount
+    
+    # 如果akshare的market_data中没有上涨/下跌数据，使用Tushare计算的数据
+    if ('上涨' not in row or pd.isna(row.get('上涨')) or str(row.get('上涨')).strip() == '') and up_count is not None:
+        row['上涨'] = up_count
+    if ('下跌' not in row or pd.isna(row.get('下跌')) or str(row.get('下跌')).strip() == '') and down_count is not None:
+        row['下跌'] = down_count
 
     try:
-        # 统一表头定义：日期 + 11 个指标
+        # 统一表头定义：日期 + 11 个指标 + 成交额 + 上涨 + 下跌
         columns = ['日期'] + [str(market_data.iloc[i]['item']) for i in range(0, 11)]
         if '成交额' not in columns:
             columns.append('成交额')
+        if '上涨' not in columns:
+            columns.append('上涨')
+        if '下跌' not in columns:
+            columns.append('下跌')
 
         # 检查CSV是否存在
         if os.path.exists(csv_file):
             df = pd.read_csv(csv_file)
 
-            # 兼容历史文件：如果没有“日期”列，则根据当前 schema 修正表头
+            # 兼容历史文件：如果没有"日期"列，则根据当前 schema 修正表头
             if '日期' not in df.columns:
                 if len(df.columns) == len(columns):
                     df.columns = columns
@@ -373,17 +344,28 @@ def get_market_data():
                     first_cols = list(df.columns)
                     first_cols[0] = '日期'
                     df.columns = first_cols
-            if '成交额' not in df.columns:
-                df['成交额'] = ""
+            
+            # 确保必要列存在
+            for col in ['成交额', '上涨', '下跌']:
+                if col not in df.columns:
+                    df[col] = ""
 
             # 检查是否已存在该日期，避免重复写入
             if not df[df['日期'] == stat_date].empty:
                 idx = df.index[df['日期'] == stat_date][0]
-                if (
-                    '成交额' in df.columns
-                    and (pd.isna(df.at[idx, '成交额']) or str(df.at[idx, '成交额']).strip() == "")
-                ):
+                
+                # 更新成交额（如果缺失）
+                if '成交额' in df.columns and (pd.isna(df.at[idx, '成交额']) or str(df.at[idx, '成交额']).strip() == ""):
                     df.at[idx, '成交额'] = row.get('成交额', "")
+                
+                # 更新上涨家数（如果缺失）
+                if '上涨' in df.columns and (pd.isna(df.at[idx, '上涨']) or str(df.at[idx, '上涨']).strip() == ""):
+                    df.at[idx, '上涨'] = row.get('上涨', "")
+                
+                # 更新下跌家数（如果缺失）
+                if '下跌' in df.columns and (pd.isna(df.at[idx, '下跌']) or str(df.at[idx, '下跌']).strip() == ""):
+                    df.at[idx, '下跌'] = row.get('下跌', "")
+                
                 df.to_csv(csv_file, index=False)
             else:
                 # 新数据插入首行，保持最近日期在上
@@ -396,53 +378,20 @@ def get_market_data():
     except Exception as e:
         print("写入market_data.csv失败:", e)
 
-    _sync_market_activity_to_mysql(stat_date, market_data, total_amount)
     return sh_df, cyb_df, kcb_df, market_data
+
 
 
 @st.cache_data(ttl='30m')
 def get_market_history(days: int = 30) -> pd.DataFrame:
     """
     获取市场历史数据。
-    优先从 MySQL market_activity_daily 读取，失败时回退本地 datas/market_data.csv。
+    从本地 datas/market_data.csv 读取。
     返回列：日期、上涨、下跌、涨停、跌停、活跃度、成交额
     """
     safe_days = max(1, int(days))
 
-    # 1) 优先从 MySQL 读取
-    try:
-        from database.db_manager import get_db
-
-        with get_db() as db:
-            rows = db.query(
-                f"""
-                SELECT
-                    trade_date AS 日期,
-                    up_count AS 上涨,
-                    down_count AS 下跌,
-                    zt_count AS 涨停,
-                    dt_count AS 跌停,
-                    activity_index AS 活跃度,
-                    total_amount AS 成交额
-                FROM market_activity_daily
-                ORDER BY trade_date DESC
-                LIMIT {safe_days}
-                """
-            )
-
-        if rows:
-            df = pd.DataFrame(rows)
-            if not df.empty:
-                df["日期"] = pd.to_datetime(df["日期"], errors="coerce")
-                df = df.dropna(subset=["日期"]).sort_values("日期").tail(safe_days)
-                for col in ["上涨", "下跌", "涨停", "跌停", "活跃度", "成交额"]:
-                    if col in df.columns:
-                        df[col] = pd.to_numeric(df[col], errors="coerce")
-                return df
-    except Exception:
-        pass
-
-    # 2) 回退 CSV
+    # 从 CSV 读取
     try:
         csv_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'datas', 'market_data.csv')
         if not os.path.exists(csv_file):
@@ -520,8 +469,8 @@ def get_all_stocks(base_date=None):
     merged["pct"] = _to_number(merged["pct"])
     merged["amount"] = _to_number(merged["amount"])
     merged["mkt_cap"] = _to_number(merged["mkt_cap"])
-    merged["amount"] = merged["amount"] * 1000
-    merged["mkt_cap"] = merged["mkt_cap"] * 10000
+    merged["amount"] = merged["amount"] / 100000
+    merged["mkt_cap"] = merged["mkt_cap"] / 10000
     merged["name"] = merged.get("name", "").fillna("")
     merged = merged.dropna(subset=["code", "pct", "amount", "mkt_cap"])
     return merged[["code", "name", "pct", "amount", "mkt_cap"]]
@@ -628,3 +577,139 @@ def get_concept_board_index(concept_name, count=181):
     return df
 
 
+@st.cache_data(ttl='1h')
+def get_market_daily_stats(days: int = 30) -> pd.DataFrame:
+    """
+    从 Tushare 获取市场每日统计数据（成交额、涨跌家数、涨停跌停数）
+    返回列：日期、成交额、上涨、下跌、涨停、跌停
+    """
+    token = st.secrets.get("tushare_token") or os.environ.get("TUSHARE_TOKEN")
+    if not token:
+        return pd.DataFrame()
+    
+    pro = ts.pro_api(token)
+    end = pd.Timestamp.now()
+    start = end - pd.Timedelta(days=days * 2)
+    
+    try:
+        # 获取每日指标数据（包含成交额、涨跌家数等）
+        df = pro.daily_info(
+            start_date=start.strftime("%Y%m%d"),
+            end_date=end.strftime("%Y%m%d")
+        )
+    except Exception as e:
+        print(f"获取市场每日统计失败: {e}")
+        return pd.DataFrame()
+    
+    if df is None or df.empty or "trade_date" not in df.columns:
+        return pd.DataFrame()
+    
+    df = df.copy()
+    df["trade_date"] = pd.to_datetime(df["trade_date"], errors="coerce")
+    df = df.dropna(subset=["trade_date"])
+    
+    # 选择并重命名列
+    result = pd.DataFrame()
+    result["日期"] = df["trade_date"]
+    
+    # 成交额（如果存在）
+    if "total_mv" in df.columns:
+        result["成交额"] = pd.to_numeric(df["total_mv"], errors="coerce")
+    elif "turnover" in df.columns:
+        result["成交额"] = pd.to_numeric(df["turnover"], errors="coerce")
+    else:
+        result["成交额"] = None
+    
+    # 涨跌家数
+    if "up_num" in df.columns:
+        result["上涨"] = pd.to_numeric(df["up_num"], errors="coerce")
+    else:
+        result["上涨"] = None
+        
+    if "down_num" in df.columns:
+        result["下跌"] = pd.to_numeric(df["down_num"], errors="coerce")
+    else:
+        result["下跌"] = None
+    
+    # 涨停跌停数（daily_info 可能没有，需要尝试其他接口）
+    result["涨停"] = None
+    result["跌停"] = None
+    
+    # 尝试从 limit_list 获取涨停跌停数据
+    try:
+        limit_df = pro.limit_list(
+            start_date=start.strftime("%Y%m%d"),
+            end_date=end.strftime("%Y%m%d"),
+            limit_type="U"
+        )
+        if limit_df is not None and not limit_df.empty:
+            limit_df["trade_date"] = pd.to_datetime(limit_df["trade_date"], errors="coerce")
+            zt_counts = limit_df.groupby("trade_date").size().reset_index(name="涨停")
+            result = result.merge(zt_counts, left_on="日期", right_on="trade_date", how="left")
+            result = result.drop(columns=["trade_date"], errors="ignore")
+    except Exception:
+        pass
+    
+    try:
+        limit_df = pro.limit_list(
+            start_date=start.strftime("%Y%m%d"),
+            end_date=end.strftime("%Y%m%d"),
+            limit_type="D"
+        )
+        if limit_df is not None and not limit_df.empty:
+            limit_df["trade_date"] = pd.to_datetime(limit_df["trade_date"], errors="coerce")
+            dt_counts = limit_df.groupby("trade_date").size().reset_index(name="跌停")
+            result = result.merge(dt_counts, left_on="日期", right_on="trade_date", how="left")
+            result = result.drop(columns=["trade_date"], errors="ignore")
+    except Exception:
+        pass
+    
+    # 计算活跃度（上涨家数占比）
+    result["活跃度"] = None
+    mask = (result["上涨"].notna()) & (result["下跌"].notna())
+    if mask.any():
+        total = result.loc[mask, "上涨"] + result.loc[mask, "下跌"]
+        result.loc[mask, "活跃度"] = (result.loc[mask, "上涨"] / total * 100).round(2)
+    
+    result = result.sort_values("日期").tail(days)
+    return result.reset_index(drop=True)
+
+
+@st.cache_data(ttl='1h')
+def get_market_amount_series(days: int = 30) -> pd.DataFrame:
+    """
+    获取市场成交额序列（从 Tushare daily 接口汇总）
+    返回列：日期、成交额（千元）
+    """
+    token = st.secrets.get("tushare_token") or os.environ.get("TUSHARE_TOKEN")
+    if not token:
+        return pd.DataFrame()
+    
+    pro = ts.pro_api(token)
+    end = pd.Timestamp.now()
+    start = end - pd.Timedelta(days=days * 2)
+    
+    try:
+        df = pro.daily(
+            start_date=start.strftime("%Y%m%d"),
+            end_date=end.strftime("%Y%m%d"),
+            fields="trade_date,amount"
+        )
+    except Exception as e:
+        print(f"获取成交额数据失败: {e}")
+        return pd.DataFrame()
+    
+    if df is None or df.empty or "trade_date" not in df.columns:
+        return pd.DataFrame()
+    
+    df = df.copy()
+    df["trade_date"] = pd.to_datetime(df["trade_date"], errors="coerce")
+    df["amount"] = pd.to_numeric(df["amount"], errors="coerce")
+    df = df.dropna(subset=["trade_date", "amount"])
+    
+    # 按日期汇总
+    daily_amount = df.groupby("trade_date")["amount"].sum().reset_index()
+    daily_amount.columns = ["日期", "成交额"]
+    daily_amount = daily_amount.sort_values("日期").tail(days)
+    
+    return daily_amount.reset_index(drop=True)

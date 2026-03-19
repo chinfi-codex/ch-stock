@@ -11,7 +11,7 @@ from .stock_data import (
     get_ak_interval_price_df,
     plotK,
     get_stock_short_name,
-    get_next_tradeday
+    get_next_tradeday,
 )
 
 # 市场数据相关
@@ -24,12 +24,12 @@ from .market_data import (
     get_financing_net_buy_series,
     get_gem_pe_series,
     get_market_history,
+    get_market_daily_stats,
+    get_market_amount_series,
 )
 
 # 金融数据相关
-from .financial_data import (
-    EconomicIndicators
-)
+from .financial_data import EconomicIndicators
 
 # 爬虫相关
 from .crawlers import (
@@ -37,7 +37,7 @@ from .crawlers import (
     ISWSpider,
     cls_telegraphs,
     cninfo_announcement_spider,
-    wxmp_post_list
+    wxmp_post_list,
 )
 
 # 大模型相关
@@ -53,57 +53,47 @@ from .utils import (
     FileInfo,
     read_files_by_condition,
     scrape_with_jina_reader,
-    clean_filename
+    clean_filename,
 )
 
 __all__ = [
     # 股票数据
-    'PriceData',
-    'StockTechnical', 
-    'get_ak_price_df',
-    'get_ak_interval_price_df',
-    'plotK',
-    'get_stock_short_name',
-    'get_next_tradeday',
-    
+    "PriceData",
+    "StockTechnical",
+    "get_ak_price_df",
+    "get_ak_interval_price_df",
+    "plotK",
+    "get_stock_short_name",
+    "get_next_tradeday",
     # 市场数据
-    'get_market_data',
-    'get_all_stocks', 
-    'get_longhu_data',
-    'get_dfcf_concept_boards',
-    'get_concept_board_index',
-    'get_financing_net_buy_series',
-    'get_gem_pe_series',
-    'get_market_history',
-    
+    "get_market_data",
+    "get_all_stocks",
+    "get_longhu_data",
+    "get_dfcf_concept_boards",
+    "get_concept_board_index",
+    "get_financing_net_buy_series",
+    "get_gem_pe_series",
+    "get_market_history",
+    "get_market_daily_stats",
+    "get_market_amount_series",
     # 金融数据
-    'StockRetriever',
-    'EconomicIndicators',
-    
+    "EconomicIndicators",
     # 爬虫
-    'InfoSpider',
-    'ISWSpider',
-    'cls_telegraphs',
-    'cninfo_announcement_spider',
-    'wxmp_post_list',
-    
-    # 微信爬虫
-    'WeixinSpider',
-    'WeixinArticleParser',
-    'WeixinConfig',
-    'WeixinArticleList',
-    
+    "InfoSpider",
+    "ISWSpider",
+    "cls_telegraphs",
+    "cninfo_announcement_spider",
+    "wxmp_post_list",
     # 大模型
-    'get_llm_response',
-    
+    "get_llm_response",
     # 工具函数
-    'df_drop_duplicated',
-    'get_stock_list',
-    'notify_pushplus',
-    'get_xueqiu_stock_topics',
-    'weibo_comments',
-    'FileInfo',
-    'read_files_by_condition',
-    'scrape_with_jina_reader',
-    'clean_filename'
-] 
+    "df_drop_duplicated",
+    "get_stock_list",
+    "notify_pushplus",
+    "get_xueqiu_stock_topics",
+    "weibo_comments",
+    "FileInfo",
+    "read_files_by_condition",
+    "scrape_with_jina_reader",
+    "clean_filename",
+]

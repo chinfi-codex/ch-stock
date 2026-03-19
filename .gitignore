@@ -1,10 +1,47 @@
+# Python
 .venv/
 .venv36/
 __pycache__/
 *.pyc
-tools/__pycache__/
-*.log
-.env
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
 
-# local-only data snapshots
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Logs & Cache
+*.log
+.ruff_cache/
+.mypy_cache/
+.pytest_cache/
+
+# Environment & Secrets
+.env
+.env.local
+.secrets/
+.streamlit/secrets.toml
+
+# Data files
+datas/reviews/*.json
+datas/*.csv
+*.csv
+
+# Fonts (large binaries)
+*.ttf
+*.otf
+*.woff
+*.woff2
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Local-only data snapshots
 datas/reviews/*.json
