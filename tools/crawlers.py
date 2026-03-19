@@ -102,6 +102,51 @@ def cls_telegraphs():
     return df
 
 
+def get_cninfo_orgid(stock_code):
+    """
+    根据股票代码获取巨潮资讯网的 orgId
+    
+    Args:
+        stock_code: 股票代码，如 '300017'
+    
+    Returns:
+        orgId 字符串，如 '9900008387'
+    """
+    url = 'http://www.cninfo.com.cn/new/information/topSearch/query'
+    headers = {
+        'Accept': '*/*',
+        'Accept-Encoding': 'gzip, deflate',
+        'Accept-Language': 'zh-CN,zh;q=0.9',
+        'Connection': 'keep-alive',
+        'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
+        'Host': 'www.cninfo.com.cn',
+        'Origin': 'http://www.cninfo.com.cn',
+        'Referer': 'http://www.cninfo.com.cn/new/commonUrl/pageOfSearch?url=disclosure/list/search',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/93.0.4577.82 Safari/537.36',
+        'X-Requested-With': 'XMLHttpRequest'
+    }
+    data = {
+        'keyWord': stock_code,
+        'maxNum': 10
+    }
+    
+    try:
+        resp = requests.post(url, data=data, headers=headers, timeout=10)
+        resp.raise_for_status()
+        result = resp.json()
+        if result and len(result) > 0:
+            # 匹配精确的股票代码
+            for item in result:
+                if item.get('code') == stock_code:
+                    return item.get('orgId')
+            # 如果没有精确匹配，返回第一个
+            return result[0].get('orgId')
+    except Exception as e:
+        logger.error(f"获取 orgId 失败: {stock_code}, error: {e}")
+    
+    return None
+
+
 def cninfo_announcement_spider(pageNum, tabType, stock='', searchkey='', category='',trade='', seDate=None):
     """
     巨潮资讯网公告爬虫
@@ -117,6 +162,10 @@ def cninfo_announcement_spider(pageNum, tabType, stock='', searchkey='', categor
     - 日常经营 category_rcjy_szsh 合同，合作，协议，进展
     - 首发 category_sf_szsh 招股书
     - 股权激励 category_gqjl_szsh
+    
+    stock 参数格式支持:
+    - 单独股票代码: '300017'
+    - code,orgId 格式: '300017,9900008387' (推荐，更精确)
     """
     if seDate is None:
         today_str = datetime.date.today().strftime("%Y-%m-%d")
@@ -148,7 +197,6 @@ def cninfo_announcement_spider(pageNum, tabType, stock='', searchkey='', categor
         'Accept-Encoding': 'gzip, deflate',
         'Accept-Language': 'zh-CN,zh;q=0.9',
         'Connection': 'keep-alive',
-        'Content-Length': '181',
         'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
         'Host': 'www.cninfo.com.cn',
         'Origin': 'http://www.cninfo.com.cn',
@@ -157,15 +205,18 @@ def cninfo_announcement_spider(pageNum, tabType, stock='', searchkey='', categor
         'X-Requested-With': 'XMLHttpRequest'
     }
 
-    results = requests.post(url, data=data, headers=headers).json()
-    if results.get('announcements'):
-        df = pd.DataFrame(results['announcements'])
-        df = df[['announcementTime', 'secName', 'secCode', 'announcementTitle', 'adjunctUrl']]
-        df['announcementTime'] = df['announcementTime'].apply(lambda x: datetime.datetime.fromtimestamp(x/1000).strftime('%Y-%m-%d'))
-        df['adjunctUrl'] = df['adjunctUrl'].apply(lambda x: 'http://static.cninfo.com.cn/' + x)
-        return df
-    else:
-        return None
+    try:
+        results = requests.post(url, data=data, headers=headers, timeout=10).json()
+        if results.get('announcements'):
+            df = pd.DataFrame(results['announcements'])
+            df = df[['announcementTime', 'secName', 'secCode', 'announcementTitle', 'adjunctUrl']]
+            df['announcementTime'] = df['announcementTime'].apply(lambda x: datetime.datetime.fromtimestamp(x/1000).strftime('%Y-%m-%d'))
+            df['adjunctUrl'] = df['adjunctUrl'].apply(lambda x: 'http://static.cninfo.com.cn/' + x)
+            return df
+    except Exception as e:
+        logger.error(f"cninfo_announcement_spider error: {e}")
+    
+    return None
 
 
 def wxmp_post_list(fakeid, begin=0, max_retries=3):
