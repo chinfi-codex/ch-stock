@@ -380,11 +380,8 @@ def build_external_section(days=120):
             from_currency="USD", to_currency="CNY", curDate=fetch_len
         )
         if usdcny_df is not None and not usdcny_df.empty:
-            usdcny_df = (
-                usdcny_df.copy()
-                .reset_index()
-                .rename(columns={"index": "date", "4. close": "value"})
-            )
+            # DataFrame already has 'date' and '4. close' columns
+            usdcny_df = usdcny_df.rename(columns={"4. close": "value"})
         usdcny_metric = _latest_metric_from_df(usdcny_df, "value")
         usdcny_series = _series_from_df(usdcny_df, "value", days)
     except Exception:
