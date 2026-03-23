@@ -859,15 +859,15 @@ def display_review_data(review_data, show_modules=None):
         with col1:
             st.markdown("上证指数")
             if not sh_df.empty:
-                plotK(sh_df)
+                plotK(sh_df, show_macd=False)
         with col2:
             st.markdown("创业板指数")
             if not cyb_df.empty:
-                plotK(cyb_df)
+                plotK(cyb_df, show_macd=False)
         with col3:
             st.markdown("科创板指数")
             if not kcb_df.empty:
-                plotK(kcb_df)
+                plotK(kcb_df, show_macd=False)
 
         import os
 
@@ -884,7 +884,7 @@ def display_review_data(review_data, show_modules=None):
                     )
                     df_history = df_history.dropna(subset=["日期"])
                     df_history = df_history.sort_values("日期")
-                    df_history = df_history.tail(30)
+                    df_history = df_history.tail(100)
                     numeric_cols = ["上涨", "下跌", "涨停", "跌停", "活跃度", "成交额"]
                     for col in numeric_cols:
                         if col in df_history.columns:
@@ -913,7 +913,7 @@ def display_review_data(review_data, show_modules=None):
                     first_row = st.columns(3)
                     with first_row[0]:
                         if "成交额" in df_history.columns:
-                            amount_df = df_history.dropna(subset=["成交额"]).copy()
+                            amount_df = df_history.dropna(subset=["成交额"]).tail(100).copy()
                             if amount_df.empty:
                                 st.info("暂无成交额数据")
                             else:
@@ -945,7 +945,7 @@ def display_review_data(review_data, show_modules=None):
 
                     with first_row[1]:
                         if "活跃度" in df_history.columns:
-                            activity_df = df_history.dropna(subset=["活跃度"]).copy()
+                            activity_df = df_history.dropna(subset=["活跃度"]).tail(100).copy()
                             if activity_df.empty:
                                 st.info("暂无活跃度数据")
                             else:
@@ -1014,7 +1014,7 @@ def display_review_data(review_data, show_modules=None):
                         ):
                             up_down_df = df_history[
                                 df_history[["上涨", "下跌"]].notna().any(axis=1)
-                            ].copy()
+                            ].tail(100).copy()
                             if up_down_df.empty:
                                 st.info("暂无涨跌家数数据")
                             else:
@@ -1066,7 +1066,7 @@ def display_review_data(review_data, show_modules=None):
                         ):
                             limit_df = df_history[
                                 df_history[["涨停", "跌停"]].notna().any(axis=1)
-                            ].copy()
+                            ].tail(100).copy()
                             if limit_df.empty:
                                 st.info("暂无涨停/跌停数据")
                             else:
@@ -1198,6 +1198,7 @@ def display_review_data(review_data, show_modules=None):
                                     plot_type="candle",
                                     ma_line=(5, 20, 60),
                                     container=st,
+                                    show_macd=False,
                                 )
                             else:
                                 st.warning(f"{name} 数据不完整")
