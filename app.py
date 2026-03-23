@@ -562,6 +562,82 @@ def display_review_data(review_data, show_modules=None):
             if us10y_date:
                 st.caption(f"\u65e5\u671f: {us10y_date}")
             _render_sparkline(us10y.get("series") or [], "#2f80ed")
+        
+        # AI 总结外围指标
+        with st.container():
+            st.markdown("#### 🤖 AI 外围指标分析")
+            
+            # 构建分析文本
+            analysis_parts = []
+            
+            # 汇率分析
+            usdcny_val = usdcny.get("value")
+            usdcny_chg = usdcny.get("change")
+            if usdcny_val and usdcny_chg is not None:
+                trend = "升值" if usdcny_chg < 0 else "贬值"
+                analysis_parts.append(f"**人民币汇率**：{usdcny_val:.4f}，较上日{trend} {abs(usdcny_chg):.2f}%。")
+            
+            # BTC分析
+            btc_val = btc.get("value")
+            btc_chg = btc.get("change")
+            if btc_val and btc_chg is not None:
+                trend = "上涨" if btc_chg > 0 else "下跌"
+                analysis_parts.append(f"**比特币**：${btc_val:,.0f}，{trend} {abs(btc_chg):.2f}%。")
+            
+            # 黄金分析
+            xau_val = xau.get("value")
+            xau_chg = xau.get("change")
+            if xau_val and xau_chg is not None:
+                trend = "上涨" if xau_chg > 0 else "下跌"
+                analysis_parts.append(f"**黄金**：${xau_val:,.2f}/oz，{trend} {abs(xau_chg):.2f}%，{'避险需求' if xau_chg > 0 else '风险偏好'}升温。")
+            
+            # 原油分析
+            wti_val = wti.get("value")
+            wti_chg = wti.get("change")
+            if wti_val and wti_chg is not None:
+                trend = "上涨" if wti_chg > 0 else "下跌"
+                analysis_parts.append(f"**WTI原油**：${wti_val:,.2f}/bbl，{trend} {abs(wti_chg):.2f}%。")
+            
+            # 美债分析
+            us10y_val = us10y.get("value")
+            us10y_chg = us10y.get("change")
+            if us10y_val and us10y_chg is not None:
+                direction = "上行" if us10y_chg > 0 else "下行"
+                analysis_parts.append(f"**美债10Y**：{us10y_val:.2f}%，{direction} {abs(us10y_chg):.1f}bp，{'通胀预期' if us10y_chg > 0 else '避险'}主导。")
+            
+            if analysis_parts:
+                # 使用类似 Kimi 的卡片式展示
+                st.markdown(
+                    f"""
+                    <div style="background-color: #f8f9fa; border-left: 4px solid #4c6ef5; padding: 16px; border-radius: 8px; margin: 12px 0;">
+                        <div style="color: #495057; font-size: 14px; line-height: 1.8;">
+                            {"<br>".join(analysis_parts)}
+                        </div>
+                    </div>
+                    """,
+                    unsafe_allow_html=True
+                )
+                
+                # 综合判断
+                risk_score = 0
+                if usdcny_chg and usdcny_chg > 0.3:
+                    risk_score += 1  # 人民币贬值，A股承压
+                if btc_chg and btc_chg < -5:
+                    risk_score += 1  # BTC大跌，风险偏好下降
+                if xau_chg and xau_chg > 1:
+                    risk_score += 1  # 黄金大涨，避险情绪
+                if us10y_chg and us10y_chg > 5:
+                    risk_score += 1  # 美债收益率上行，资金成本上升
+                
+                if risk_score >= 3:
+                    st.warning("⚠️ **风险提示**：外围环境偏空，注意仓位控制")
+                elif risk_score <= 1:
+                    st.success("✅ **机会提示**：外围环境偏暖，可积极关注")
+                else:
+                    st.info("ℹ️ **中性判断**：外围信号混合，保持观望")
+            else:
+                st.info("暂无外围指标数据")
+        
         st.markdown("---")
 
     if _show("market"):
@@ -1235,5 +1311,4 @@ if realtime_load_btn:
         st.stop()
 
     review_data = build_review_data(select_date, show_modules)
-    st.info("已按实时方案取数")
     display_review_data(review_data, show_modules)
