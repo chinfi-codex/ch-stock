@@ -22,11 +22,12 @@ logger = logging.getLogger(__name__)
 # Tushare 相关工具函数
 # =============================================================================
 
+
 def get_tushare_token() -> str:
     """
     获取 Tushare Token
     优先级：环境变量 > streamlit secrets > .env文件
-    
+
     Returns:
         str: Tushare token，如果未找到则返回空字符串
     """
@@ -34,7 +35,7 @@ def get_tushare_token() -> str:
     token = os.environ.get("TUSHARE_TOKEN", "").strip()
     if token:
         return token
-    
+
     # 2. 尝试从 streamlit secrets 获取
     try:
         token = st.secrets.get("tushare_token", "")
@@ -42,10 +43,12 @@ def get_tushare_token() -> str:
             return token.strip()
     except Exception:
         pass
-    
+
     # 3. 尝试从 .env 文件获取
     try:
-        env_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".env"))
+        env_path = os.path.abspath(
+            os.path.join(os.path.dirname(__file__), "..", ".env")
+        )
         if os.path.exists(env_path):
             with open(env_path, "r", encoding="utf-8") as f:
                 for line in f:
@@ -59,23 +62,25 @@ def get_tushare_token() -> str:
                             return token
     except Exception:
         pass
-    
+
     return ""
 
 
 def get_tushare_pro():
     """
     获取 Tushare Pro API 客户端
-    
+
     Returns:
         ts.ProApi: Tushare Pro API 客户端
-        
+
     Raises:
         RuntimeError: 如果无法获取 TUSHARE_TOKEN
     """
     token = get_tushare_token()
     if not token:
-        raise RuntimeError("Missing TUSHARE_TOKEN: 请设置环境变量或在 .streamlit/secrets.toml 中配置")
+        raise RuntimeError(
+            "Missing TUSHARE_TOKEN: 请设置环境变量或在 .streamlit/secrets.toml 中配置"
+        )
     return ts.pro_api(token)
 
 
@@ -83,46 +88,47 @@ def get_tushare_pro():
 # 股票代码转换工具函数
 # =============================================================================
 
+
 def convert_to_ts_code(code: Optional[str]) -> str:
     """
     将多种股票代码格式转换为 Tushare ts_code 格式 (xxxxxx.SH/SZ/BJ)
-    
+
     支持的输入格式：
     - 纯数字: 000001, 600000
     - 带前缀: sz000001, sh600000, SZ000001, SH600000
     - ts_code: 000001.SZ, 600000.SH
-    
+
     Args:
         code: 股票代码
-        
+
     Returns:
         str: 标准 ts_code 格式
-        
+
     Raises:
         ValueError: 如果 code 为 None 或空字符串
     """
     if code is None:
         raise ValueError("股票代码不能为空")
-    
+
     code = str(code).strip()
     if not code:
         raise ValueError("股票代码不能为空")
-    
+
     upper_code = code.upper()
-    
+
     # 已经是 ts_code 格式
     if "." in upper_code:
         prefix, suffix = upper_code.split(".", 1)
         suffix = suffix.replace("SS", "SH")  # 兼容 SS 后缀
         if suffix in {"SH", "SZ", "BJ"}:
             return f"{prefix}.{suffix}"
-    
+
     # 带前缀格式 (szxxxxxx, shxxxxxx, bjxxxxxx)
     if upper_code.startswith(("SZ", "SH", "BJ")) and len(upper_code) >= 8:
         body = upper_code[2:]
         suffix = upper_code[:2]
         return f"{body}.{suffix}"
-    
+
     # 纯数字格式
     if len(code) == 6 and code.isdigit():
         if code.startswith(("0", "3")):
@@ -131,7 +137,7 @@ def convert_to_ts_code(code: Optional[str]) -> str:
             return f"{code}.SH"
         elif code.startswith("8"):
             return f"{code}.BJ"
-    
+
     # 无法识别的格式，原样返回
     return upper_code
 
@@ -139,25 +145,25 @@ def convert_to_ts_code(code: Optional[str]) -> str:
 def convert_to_ak_code(code: str) -> str:
     """
     将股票代码转换为 AKShare 格式 (shxxxxxx/szxxxxxx/bjxxxxxx)
-    
+
     Args:
         code: 股票代码
-        
+
     Returns:
         str: AKShare 格式代码
     """
     code = str(code).strip()
-    
+
     # 已经是 ak_code 格式
     if code.lower().startswith(("sh", "sz", "bj")) and len(code) >= 8:
         return code.lower()
-    
+
     # ts_code 格式
     if "." in code:
         parts = code.split(".")
         if len(parts) == 2 and parts[1].upper() in ("SH", "SZ", "BJ"):
             return f"{parts[1].lower()}{parts[0]}"
-    
+
     # 纯数字格式
     if len(code) == 6 and code.isdigit():
         if code.startswith(("0", "3")):
@@ -166,17 +172,17 @@ def convert_to_ak_code(code: str) -> str:
             return f"sh{code}"
         elif code.startswith("8"):
             return f"bj{code}"
-    
+
     return code.lower()
 
 
 def extract_code6(value: str) -> str:
     """
     从字符串中提取6位股票代码
-    
+
     Args:
         value: 包含股票代码的字符串
-        
+
     Returns:
         str: 6位数字股票代码，如果未找到则返回空字符串
     """
@@ -187,16 +193,16 @@ def extract_code6(value: str) -> str:
 def classify_board(code6: str) -> str:
     """
     根据6位股票代码判断所属板块
-    
+
     Args:
         code6: 6位股票代码
-        
+
     Returns:
         str: 板块名称 (主板/创业板/科创板/北交所)
     """
     if not code6 or len(code6) != 6:
         return "未知"
-    
+
     if code6.startswith("688") or code6.startswith("689"):
         return "科创板"
     if code6.startswith(("300", "301")):
@@ -205,7 +211,7 @@ def classify_board(code6: str) -> str:
         return "北交所"
     if code6.startswith(("0", "3", "6")):
         return "主板"
-    
+
     return "未知"
 
 
@@ -213,14 +219,116 @@ def classify_board(code6: str) -> str:
 # 数据处理工具函数
 # =============================================================================
 
+
+def latest_metric_from_df(
+    df: pd.DataFrame, value_col: str, date_col: str = "date"
+) -> Optional[dict]:
+    """从 DataFrame 中获取最新和前一行的指标值
+
+    Args:
+        df: DataFrame
+        value_col: 数值列名
+        date_col: 日期列名，默认为 "date"
+
+    Returns:
+        dict: 包含 date, value, prev_value 的字典，如果数据为空则返回 None
+    """
+    if df is None or df.empty or value_col not in df.columns:
+        return None
+    view = df.copy()
+    if date_col in view.columns:
+        view[date_col] = pd.to_datetime(view[date_col], errors="coerce")
+    view[value_col] = pd.to_numeric(view[value_col], errors="coerce")
+    view = view.dropna(subset=[value_col])
+    if date_col in view.columns:
+        view = view.dropna(subset=[date_col]).sort_values(date_col, ascending=False)
+    if view.empty:
+        return None
+    latest = view.iloc[0]
+    prev_value = None
+    if len(view) > 1:
+        prev_value = view.iloc[1][value_col]
+    return {
+        "date": latest[date_col] if date_col in view.columns else None,
+        "value": float(latest[value_col]),
+        "prev_value": float(prev_value)
+        if prev_value is not None and not pd.isna(prev_value)
+        else None,
+    }
+
+
+def calc_pct_change(current: float, previous: float) -> Optional[float]:
+    """计算百分比变化
+
+    Args:
+        current: 当前值
+        previous: 前一值
+
+    Returns:
+        float: 百分比变化，如果无法计算则返回 None
+    """
+    if current is None or previous is None or previous == 0:
+        return None
+    return (current / previous - 1) * 100
+
+
+def series_from_df(df: pd.DataFrame, value_col: str, days: int) -> list:
+    """从 DataFrame 提取时间序列数据
+
+    Args:
+        df: DataFrame
+        value_col: 数值列名
+        days: 返回的天数
+
+    Returns:
+        list: 包含 date 和 value 的字典列表
+    """
+    if df is None or df.empty or value_col not in df.columns:
+        return []
+    view = df.copy()
+    if "date" in view.columns:
+        view["date"] = pd.to_datetime(view["date"], errors="coerce")
+    view[value_col] = pd.to_numeric(view[value_col], errors="coerce")
+    view = view.dropna(subset=[value_col])
+    if "date" in view.columns:
+        view = view.dropna(subset=["date"]).sort_values("date")
+    if view.empty:
+        return []
+    view = view.tail(int(days))
+    if "date" in view.columns:
+        view["date"] = view["date"].dt.strftime("%Y-%m-%d")
+    view = view[["date", value_col]].rename(columns={value_col: "value"})
+    return view.to_dict(orient="records")
+
+
+def filter_st_bj_stocks(df: pd.DataFrame) -> pd.DataFrame:
+    """过滤掉 ST 和北交所股票
+
+    Args:
+        df: 包含 code 和 name 列的 DataFrame
+
+    Returns:
+        pd.DataFrame: 过滤后的 DataFrame
+    """
+    if df is None or df.empty:
+        return df
+    if {"code", "name"}.issubset(df.columns):
+        view = df.copy()
+        code_str = view["code"].astype(str).str.lower().str.strip()
+        is_bj = code_str.str.startswith("bj") | code_str.str.startswith(("4", "8"))
+        is_st = view["name"].astype(str).str.upper().str.contains("ST", na=False)
+        return view[~is_bj & ~is_st]
+    return df
+
+
 def pick_first_column(df: pd.DataFrame, candidates: list) -> Optional[str]:
     """
     从候选列名中选择第一个存在于 DataFrame 中的列名
-    
+
     Args:
         df: DataFrame
         candidates: 候选列名列表
-        
+
     Returns:
         Optional[str]: 存在的列名，如果都不存在则返回 None
     """
@@ -235,10 +343,10 @@ def pick_first_column(df: pd.DataFrame, candidates: list) -> Optional[str]:
 def to_number(series: Union[pd.Series, Any]) -> Optional[pd.Series]:
     """
     将 Series 转换为数值类型，移除百分号
-    
+
     Args:
         series: 输入数据
-        
+
     Returns:
         Optional[pd.Series]: 数值 Series，如果输入为 None 则返回 None
     """
@@ -251,13 +359,13 @@ def to_number(series: Union[pd.Series, Any]) -> Optional[pd.Series]:
 def normalize_trade_date(trade_date: Any) -> tuple:
     """
     标准化交易日期
-    
+
     Args:
         trade_date: 日期（支持多种格式）
-        
+
     Returns:
         tuple: (yyyyMMdd 格式字符串, date 对象)
-        
+
     Raises:
         ValueError: 如果日期格式无效
     """
@@ -274,16 +382,18 @@ _pick_first_column = pick_first_column
 _normalize_trade_date = normalize_trade_date
 
 
-def scrape_with_jina_reader(url: str, title: str = "", output_dir: str = "", save_to_file: bool = True) -> dict:
+def scrape_with_jina_reader(
+    url: str, title: str = "", output_dir: str = "", save_to_file: bool = True
+) -> dict:
     """
     使用Jina Reader爬取网页内容
-    
+
     Args:
         url (str): 要爬取的网页URL
         title (str): 文章标题，用于生成文件名
         output_dir (str): 输出目录，如果为空则不保存文件
         save_to_file (bool): 是否保存到文件
-    
+
     Returns:
         dict: 包含爬取结果的字典
         {
@@ -296,106 +406,103 @@ def scrape_with_jina_reader(url: str, title: str = "", output_dir: str = "", sav
     try:
         # 使用Jina Reader API
         jina_url = f"https://r.jina.ai/{url}"
-        
+
         # 获取 API Key
         jina_api_key = _get_jina_api_key()
         if not jina_api_key:
             result = {
-                'success': False,
-                'content': '',
-                'filepath': '',
-                'error': "Missing JINA_API_KEY: 请设置环境变量或在 .streamlit/secrets.toml 中配置"
+                "success": False,
+                "content": "",
+                "filepath": "",
+                "error": "Missing JINA_API_KEY: 请设置环境变量或在 .streamlit/secrets.toml 中配置",
             }
-            logger.error(result['error'])
+            logger.error(result["error"])
             return result
-        
+
         # 设置Jina Reader的请求头
         jina_headers = {
             "Authorization": f"Bearer {jina_api_key}",
             "X-Return-Format": "markdown",
             "X-With-Images-Summary": "true",
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
         }
-        
+
         logger.info(f"使用Jina Reader爬取: {url}")
         response = requests.get(jina_url, headers=jina_headers, timeout=30)
         response.raise_for_status()
-        
-        result = {
-            'success': False,
-            'content': '',
-            'filepath': '',
-            'error': ''
-        }
-        
+
+        result = {"success": False, "content": "", "filepath": "", "error": ""}
+
         # 如果返回200，处理返回的markdown内容
         if response.status_code == 200:
-            result['success'] = True
-            result['content'] = response.text
-            
+            result["success"] = True
+            result["content"] = response.text
+
             # 如果需要保存到文件
             if save_to_file and output_dir and title:
                 try:
                     # 确保输出目录存在
                     os.makedirs(output_dir, exist_ok=True)
-                    
+
                     # 清理文件名
                     safe_title = clean_filename(title)
                     filename = f"{safe_title}.md"
                     filepath = os.path.join(output_dir, filename)
-                    
+
                     # 构建完整的markdown内容
                     content = []
                     content.append(f"# {title}\n")
                     content.append(f"Source: {url}\n")
-                    content.append(f"Scraped with Jina Reader: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n")
+                    content.append(
+                        f"Scraped with Jina Reader: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
+                    )
                     content.append(response.text)
-                    
+
                     # 写入文件
-                    with open(filepath, 'w', encoding='utf-8') as f:
-                        f.write(''.join(content))
-                    
-                    result['filepath'] = filepath
+                    with open(filepath, "w", encoding="utf-8") as f:
+                        f.write("".join(content))
+
+                    result["filepath"] = filepath
                     logger.info(f"Jina Reader爬取成功并保存到: {filepath}")
-                    
+
                 except Exception as e:
                     logger.error(f"保存文件失败: {e}")
-                    result['error'] = f"保存文件失败: {str(e)}"
+                    result["error"] = f"保存文件失败: {str(e)}"
             else:
                 logger.info("Jina Reader爬取成功")
         else:
-            result['error'] = f"Jina Reader返回状态码: {response.status_code}"
+            result["error"] = f"Jina Reader返回状态码: {response.status_code}"
             logger.error(f"Jina Reader返回状态码: {response.status_code}")
-            
+
     except requests.exceptions.RequestException as e:
-        result['error'] = f"网络请求失败: {str(e)}"
+        result["error"] = f"网络请求失败: {str(e)}"
         logger.error(f"Jina Reader网络请求失败: {e}")
     except Exception as e:
-        result['error'] = f"爬取失败: {str(e)}"
+        result["error"] = f"爬取失败: {str(e)}"
         logger.error(f"Jina Reader爬取失败: {e}")
-    
+
     return result
 
 
 def clean_filename(filename: str) -> str:
     """
     清理文件名，移除非法字符
-    
+
     Args:
         filename (str): 原始文件名
-    
+
     Returns:
         str: 清理后的文件名
     """
     # 移除或替换非法字符
     illegal_chars = '<>:"/\\|?*'
     for char in illegal_chars:
-        filename = filename.replace(char, '_')
-    
+        filename = filename.replace(char, "_")
+
     # 限制文件名长度
     if len(filename) > 100:
         filename = filename[:100]
-    
+
     return filename
 
 
@@ -403,12 +510,12 @@ def clean_filename(filename: str) -> str:
 def get_stock_list():
     """获取股票列表"""
     url = "http://www.cninfo.com.cn/new/data/szse_stock.json"
-    resp = requests.get(url).json()['stockList']
+    resp = requests.get(url).json()["stockList"]
     df = pd.DataFrame(resp)
     return df
 
 
-def df_drop_duplicated(df, subset=None, keep='first'):
+def df_drop_duplicated(df, subset=None, keep="first"):
     """删除重复数据"""
     return df.drop_duplicates(subset=subset, keep=keep)
 
@@ -431,20 +538,22 @@ def notify_pushplus(title, content, topic):
     """推送消息到PushPlus"""
     token = _get_pushplus_token()
     if not token:
-        logger.error("Missing PUSHPLUS_TOKEN: 请设置环境变量或在 .streamlit/secrets.toml 中配置")
+        logger.error(
+            "Missing PUSHPLUS_TOKEN: 请设置环境变量或在 .streamlit/secrets.toml 中配置"
+        )
         return None
-        
-    url = 'http://www.pushplus.plus/send'
+
+    url = "http://www.pushplus.plus/send"
     payload = {
-       "token": token,
-       "title": title,
-       "content": content, 
-       "topic": topic,
-       "template": "html"
+        "token": token,
+        "title": title,
+        "content": content,
+        "topic": topic,
+        "template": "html",
     }
     headers = {
-       'User-Agent': 'Apifox/1.0.0 (https://apifox.com)',
-       'Content-Type': 'application/json'
+        "User-Agent": "Apifox/1.0.0 (https://apifox.com)",
+        "Content-Type": "application/json",
     }
     resp = requests.post(url, json=payload, headers=headers)
     return resp
@@ -468,73 +577,74 @@ def get_xueqiu_stock_topics(stock_code, cookie, page_id=3):
         "elastic-apm-traceparent": "00-db43983b4c5505f4d4a674fd89b785f0-574b28f413051bda-00",
         "sec-ch-ua": '"Google Chrome";v="137", "Chromium";v="137", "Not/A)Brand";v="24"',
         "sec-ch-ua-mobile": "?0",
-        "sec-ch-ua-platform": '"Windows"'
+        "sec-ch-ua-platform": '"Windows"',
     }
-  
-    if stock_code.startswith('6'):
-        stock_code = 'SH' + stock_code
+
+    if stock_code.startswith("6"):
+        stock_code = "SH" + stock_code
     else:
-        stock_code = 'SZ' + stock_code
+        stock_code = "SZ" + stock_code
 
     topic_texts = []
     for i in range(1, page_id):
-        url = f'https://xueqiu.com/query/v1/symbol/search/status.json?count=10&comment=0&symbol={stock_code}&hl=0&source=all&sort=time&page={i}&q=&type=82'
+        url = f"https://xueqiu.com/query/v1/symbol/search/status.json?count=10&comment=0&symbol={stock_code}&hl=0&source=all&sort=time&page={i}&q=&type=82"
         try:
             resp = requests.get(url=url, headers=headers, timeout=8)
             resp.raise_for_status()
             data = resp.json()
-            topics = data.get('list', [])
+            topics = data.get("list", [])
         except Exception as e:
             # 可根据需要打印或记录异常
             break
         if not topics:
             break
         for topic in topics:
-            if 'text' in topic:
-                txt = topic.get('text')
+            if "text" in topic:
+                txt = topic.get("text")
                 # 去除<img ...>标签
-                txt = re.sub(r'<img.*?>', '', txt, flags=re.DOTALL)
+                txt = re.sub(r"<img.*?>", "", txt, flags=re.DOTALL)
                 # 去除<a ...>...</a>标签及其内容
-                txt = re.sub(r'<a.*?>.*?</a>', '', txt, flags=re.DOTALL)
+                txt = re.sub(r"<a.*?>.*?</a>", "", txt, flags=re.DOTALL)
                 topic_texts.append(txt)
     return topic_texts
 
 
 def weibo_comments(wid):
     """获取微博评论"""
-    url = f'https://weibo.com/ajax/statuses/show?id={wid}'
-    header = {
-        'user-agent': UserAgent().random
-    }
+    url = f"https://weibo.com/ajax/statuses/show?id={wid}"
+    header = {"user-agent": UserAgent().random}
     res = requests.get(url=url, headers=header)
     json_data = res.json()
-    id = json_data['id']
-    user_id = json_data['user']['idstr']
+    id = json_data["id"]
+    user_id = json_data["user"]["idstr"]
 
     # 获取评论
     comments = []
-    max_id = ''
+    max_id = ""
     while max_id != 0:
-        pl_url = f'https://weibo.com/ajax/statuses/buildComments?is_reload=1&id={id}&is_show_bulletin=2&is_mix=0&max_id={max_id}&count=10&uid={user_id}'
+        pl_url = f"https://weibo.com/ajax/statuses/buildComments?is_reload=1&id={id}&is_show_bulletin=2&is_mix=0&max_id={max_id}&count=10&uid={user_id}"
         resp = requests.get(url=pl_url, headers=header)
         json_data = resp.json()
-        max_id = json_data['max_id']
-        lis = json_data['data']
+        max_id = json_data["max_id"]
+        lis = json_data["data"]
         for li in lis:
-            text_raw = li['text_raw']
+            text_raw = li["text_raw"]
             comments.append(text_raw)
     return comments
 
 
 class FileInfo:
     """文件信息类"""
+
     def __init__(self, filename, created_date, content):
         self.filename = filename
         self.created_date = created_date
         self.content = content
 
 
-def read_files_by_condition(directory, keyword=None, start_date=None, end_date=None, encoding='utf-8'):
+def read_files_by_condition(
+    directory, keyword=None, start_date=None, end_date=None, encoding="utf-8"
+):
     """
     从本地指定目录中按条件读取文件内容，条件包括关键词、创建日期
 
@@ -569,18 +679,20 @@ def read_files_by_condition(directory, keyword=None, start_date=None, end_date=N
                 content = None
                 if keyword:
                     if keyword not in fname:
-                        with open(fpath, 'r', encoding=encoding, errors='ignore') as f:
+                        with open(fpath, "r", encoding=encoding, errors="ignore") as f:
                             file_content = f.read()
                         if keyword not in file_content:
                             continue
                         content = file_content
                     else:
-                        with open(fpath, 'r', encoding=encoding, errors='ignore') as f:
+                        with open(fpath, "r", encoding=encoding, errors="ignore") as f:
                             content = f.read()
                 else:
-                    with open(fpath, 'r', encoding=encoding, errors='ignore') as f:
+                    with open(fpath, "r", encoding=encoding, errors="ignore") as f:
                         content = f.read()
-                results.append(FileInfo(filename=fpath, created_date=created_date, content=content))
+                results.append(
+                    FileInfo(filename=fpath, created_date=created_date, content=content)
+                )
             except Exception:
                 continue
-    return results 
+    return results

@@ -23,6 +23,7 @@ from data_sources import (
 from tools import get_all_stocks, get_longhu_data, get_market_data
 from tools.financial_data import EconomicIndicators
 from tools.storage_utils import save_review_data
+from tools.utils import latest_metric_from_df, calc_pct_change, series_from_df
 
 
 def _parse_date(date_str):
@@ -35,6 +36,7 @@ def _is_trade_day(target_date):
     if not token:
         try:
             import streamlit as st
+
             token = st.secrets.get("tushare_token")
         except Exception:
             token = None
@@ -92,54 +94,6 @@ def _find_market_value(item_map, keywords):
     return None
 
 
-def _latest_metric_from_df(df, value_col, date_col="date"):
-    if df is None or df.empty or value_col not in df.columns:
-        return None
-    view = df.copy()
-    if date_col in view.columns:
-        view[date_col] = pd.to_datetime(view[date_col], errors="coerce")
-    view[value_col] = pd.to_numeric(view[value_col], errors="coerce")
-    view = view.dropna(subset=[value_col])
-    if date_col in view.columns:
-        view = view.dropna(subset=[date_col]).sort_values(date_col, ascending=False)
-    if view.empty:
-        return None
-    latest = view.iloc[0]
-    prev_value = None
-    if len(view) > 1:
-        prev_value = view.iloc[1][value_col]
-    return {
-        "date": latest[date_col] if date_col in view.columns else None,
-        "value": float(latest[value_col]),
-        "prev_value": float(prev_value) if prev_value is not None and not pd.isna(prev_value) else None,
-    }
-
-
-def _calc_pct_change(current, previous):
-    if current is None or previous is None or previous == 0:
-        return None
-    return (current / previous - 1) * 100
-
-
-def _series_from_df(df, value_col, days):
-    if df is None or df.empty or value_col not in df.columns:
-        return []
-    view = df.copy()
-    if "date" in view.columns:
-        view["date"] = pd.to_datetime(view["date"], errors="coerce")
-    view[value_col] = pd.to_numeric(view[value_col], errors="coerce")
-    view = view.dropna(subset=[value_col])
-    if "date" in view.columns:
-        view = view.dropna(subset=["date"]).sort_values("date")
-    if view.empty:
-        return []
-    view = view.tail(int(days))
-    if "date" in view.columns:
-        view["date"] = view["date"].dt.strftime("%Y-%m-%d")
-    view = view[["date", value_col]].rename(columns={value_col: "value"})
-    return view.to_dict(orient="records")
-
-
 def build_external_section(days=120):
     btc_metric = None
     us10y_metric = None
@@ -152,23 +106,29 @@ def build_external_section(days=120):
     fetch_len = max(int(days * 2), 60)
 
     try:
-        btc_df = EconomicIndicators.get_crypto_daily(symbol="BTC", market="USD", curDate=fetch_len)
-        btc_metric = _latest_metric_from_df(btc_df, "close")
-        btc_series = _series_from_df(btc_df, "close", days)
+        btc_df = EconomicIndicators.get_crypto_daily(
+            symbol="BTC", market="USD", curDate=fetch_len
+        )
+        btc_metric = latest_metric_from_df(btc_df, "close")
+        btc_series = series_from_df(btc_df, "close", days)
     except Exception:
         btc_metric = None
 
     try:
-        us10y_df = EconomicIndicators.get_treasury_yield(maturity="10year", interval="daily", curDate=fetch_len)
-        us10y_metric = _latest_metric_from_df(us10y_df, "value")
-        us10y_series = _series_from_df(us10y_df, "value", days)
+        us10y_df = EconomicIndicators.get_treasury_yield(
+            maturity="10year", interval="daily", curDate=fetch_len
+        )
+        us10y_metric = latest_metric_from_df(us10y_df, "value")
+        us10y_series = series_from_df(us10y_df, "value", days)
     except Exception:
         us10y_metric = None
 
     try:
-        xau_df = EconomicIndicators.get_gold_silver_history(symbol="XAU", interval="daily", curDate=fetch_len)
-        xau_metric = _latest_metric_from_df(xau_df, "value")
-        xau_series = _series_from_df(xau_df, "value", days)
+        xau_df = EconomicIndicators.get_gold_silver_history(
+            symbol="XAU", interval="daily", curDate=fetch_len
+        )
+        xau_metric = latest_metric_from_df(xau_df, "value")
+        xau_series = series_from_df(xau_df, "value", days)
     except Exception:
         xau_metric = None
 
@@ -179,7 +139,7 @@ def build_external_section(days=120):
         prev = metric.get("prev_value")
         change = None
         if change_kind == "pct":
-            change = _calc_pct_change(current, prev)
+            change = calc_pct_change(current, prev)
         elif change_kind == "bp":
             if prev is not None:
                 change = (current - prev) * 100
@@ -234,39 +194,70 @@ def build_market_section(select_date, all_stocks_df=None):
 
 # concept section disabled (akshare blocked)
 
+
 def build_top100_section(select_date, all_stocks_df=None):
-    source_df = all_stocks_df if all_stocks_df is not None else get_all_stocks(select_date)
+    source_df = (
+        all_stocks_df if all_stocks_df is not None else get_all_stocks(select_date)
+    )
     today_top_stocks = _normalize_top_stocks_df(source_df)
 
     if not today_top_stocks.empty:
         cols = list(today_top_stocks.columns)
         if len(cols) >= 4:
-            rename_pos = {cols[0]: "name", cols[1]: "code", cols[2]: "pct", cols[3]: "amount"}
+            rename_pos = {
+                cols[0]: "name",
+                cols[1]: "code",
+                cols[2]: "pct",
+                cols[3]: "amount",
+            }
             today_top_stocks = today_top_stocks.rename(columns=rename_pos)
 
     turnover_records = []
-    if not today_top_stocks.empty and {"pct", "amount", "name", "code"}.issubset(today_top_stocks.columns):
-        top_100_by_turnover = today_top_stocks.sort_values("amount", ascending=False).head(100)
-        top_100_by_turnover["pct"] = pd.to_numeric(top_100_by_turnover["pct"], errors="coerce")
-        turnover_records = top_100_by_turnover[["name", "code", "pct", "amount"]].to_dict(orient="records")
+    if not today_top_stocks.empty and {"pct", "amount", "name", "code"}.issubset(
+        today_top_stocks.columns
+    ):
+        top_100_by_turnover = today_top_stocks.sort_values(
+            "amount", ascending=False
+        ).head(100)
+        top_100_by_turnover["pct"] = pd.to_numeric(
+            top_100_by_turnover["pct"], errors="coerce"
+        )
+        turnover_records = top_100_by_turnover[
+            ["name", "code", "pct", "amount"]
+        ].to_dict(orient="records")
 
     range_data = {"sh_stocks": [], "cyb_kcb_stocks": []}
-    if not today_top_stocks.empty and {"pct", "amount", "name", "code"}.issubset(today_top_stocks.columns):
-        top_100_by_range = today_top_stocks.sort_values("pct", ascending=False).head(100)
+    if not today_top_stocks.empty and {"pct", "amount", "name", "code"}.issubset(
+        today_top_stocks.columns
+    ):
+        top_100_by_range = today_top_stocks.sort_values("pct", ascending=False).head(
+            100
+        )
         code_series = top_100_by_range["code"].astype(str)
         sh_df = top_100_by_range[
-            (code_series.str[2:].str.startswith("6") | code_series.str[2:].str.startswith("0"))
+            (
+                code_series.str[2:].str.startswith("6")
+                | code_series.str[2:].str.startswith("0")
+            )
             & ~code_series.str[2:].str.startswith("688")
         ]
         cyb_kcb_df = top_100_by_range[
-            code_series.str[2:].str.startswith("3") | code_series.str[2:].str.startswith("688")
+            code_series.str[2:].str.startswith("3")
+            | code_series.str[2:].str.startswith("688")
         ]
         range_data = {
-            "sh_stocks": sh_df[["name", "code", "pct", "amount"]].to_dict(orient="records"),
-            "cyb_kcb_stocks": cyb_kcb_df[["name", "code", "pct", "amount"]].to_dict(orient="records"),
+            "sh_stocks": sh_df[["name", "code", "pct", "amount"]].to_dict(
+                orient="records"
+            ),
+            "cyb_kcb_stocks": cyb_kcb_df[["name", "code", "pct", "amount"]].to_dict(
+                orient="records"
+            ),
         }
 
-    return {"top_100_turnover": turnover_records, "top_100_range": range_data}, source_df
+    return {
+        "top_100_turnover": turnover_records,
+        "top_100_range": range_data,
+    }, source_df
 
 
 def build_review_data(select_date):
@@ -285,13 +276,21 @@ def build_review_data(select_date):
 
     gainers = []
     losers = []
-    if all_stocks_df is not None and not all_stocks_df.empty and "pct" in all_stocks_df.columns:
+    if (
+        all_stocks_df is not None
+        and not all_stocks_df.empty
+        and "pct" in all_stocks_df.columns
+    ):
         view = all_stocks_df.copy()
         view["pct"] = pd.to_numeric(view["pct"], errors="coerce")
         view = view.dropna(subset=["pct"])
         gainers_df = view.sort_values("pct", ascending=False).head(100)
         losers_df = view.sort_values("pct", ascending=True).head(100)
-        keep_cols = [col for col in ["code", "name", "pct", "amount", "mkt_cap"] if col in view.columns]
+        keep_cols = [
+            col
+            for col in ["code", "name", "pct", "amount", "mkt_cap"]
+            if col in view.columns
+        ]
         if keep_cols:
             gainers = gainers_df[keep_cols].to_dict(orient="records")
             losers = losers_df[keep_cols].to_dict(orient="records")
@@ -344,7 +343,10 @@ def _is_review_data_complete(review_data):
         return False, "top_100_turnover missing"
 
     top_100_range = review_data.get("top_100_range") or {}
-    if not ((top_100_range.get("sh_stocks") or []) or (top_100_range.get("cyb_kcb_stocks") or [])):
+    if not (
+        (top_100_range.get("sh_stocks") or [])
+        or (top_100_range.get("cyb_kcb_stocks") or [])
+    ):
         return False, "top_100_range missing"
 
     short_data = review_data.get("short") or {}
@@ -361,7 +363,11 @@ def run_once(target_date, output_dir, skip_weekend=False):
 
     is_open, source = _is_trade_day(target_date)
     if not is_open:
-        logging.info("Skip non-trading day: %s (source=%s)", target_date.strftime("%Y-%m-%d"), source)
+        logging.info(
+            "Skip non-trading day: %s (source=%s)",
+            target_date.strftime("%Y-%m-%d"),
+            source,
+        )
         return None
 
     review_data = build_full_review_data(target_date)
@@ -384,7 +390,9 @@ def run_once(target_date, output_dir, skip_weekend=False):
     return file_path
 
 
-def run_scheduler(run_time, output_dir, skip_weekend=False, run_immediately=False, poll_seconds=30):
+def run_scheduler(
+    run_time, output_dir, skip_weekend=False, run_immediately=False, poll_seconds=30
+):
     try:
         import schedule
     except ModuleNotFoundError as exc:
@@ -399,7 +407,9 @@ def run_scheduler(run_time, output_dir, skip_weekend=False, run_immediately=Fals
             logging.exception("Daily review job failed")
 
     schedule.every().day.at(run_time).do(_job)
-    logging.info("Scheduler started. Run time: %s, output dir: %s", run_time, output_dir)
+    logging.info(
+        "Scheduler started. Run time: %s, output dir: %s", run_time, output_dir
+    )
 
     if run_immediately:
         _job()
@@ -419,9 +429,17 @@ def build_parser():
     )
     parser.add_argument("--run-once", action="store_true", help="Run once and exit")
     parser.add_argument("--date", help="Target date for --run-once, format YYYY-MM-DD")
-    parser.add_argument("--run-immediately", action="store_true", help="Run one time when scheduler starts")
-    parser.add_argument("--skip-weekend", action="store_true", help="Skip Saturday/Sunday")
-    parser.add_argument("--poll-seconds", type=int, default=30, help="Scheduler polling interval")
+    parser.add_argument(
+        "--run-immediately",
+        action="store_true",
+        help="Run one time when scheduler starts",
+    )
+    parser.add_argument(
+        "--skip-weekend", action="store_true", help="Skip Saturday/Sunday"
+    )
+    parser.add_argument(
+        "--poll-seconds", type=int, default=30, help="Scheduler polling interval"
+    )
     return parser
 
 

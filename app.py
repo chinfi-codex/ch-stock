@@ -14,6 +14,17 @@ from tools import (
 )
 from tools.stock_data import get_ak_price_df
 from tools.financial_data import EconomicIndicators
+from tools.ai_analysis import (
+    analyze_external_assets,
+    analyze_index_technical,
+    format_series_for_ai,
+)
+from tools.utils import (
+    latest_metric_from_df,
+    calc_pct_change,
+    series_from_df,
+    filter_st_bj_stocks,
+)
 from data_sources import (
     _normalize_top_stocks_df,
     _df_to_records,
@@ -28,56 +39,6 @@ def _section_title(title):
         f"<div style='font-size:26px;font-weight:700;margin:8px 0 8px 0;'>{title}</div>",
         unsafe_allow_html=True,
     )
-
-
-def _latest_metric_from_df(df, value_col, date_col="date"):
-    if df is None or df.empty or value_col not in df.columns:
-        return None
-    view = df.copy()
-    if date_col in view.columns:
-        view[date_col] = pd.to_datetime(view[date_col], errors="coerce")
-    view[value_col] = pd.to_numeric(view[value_col], errors="coerce")
-    view = view.dropna(subset=[value_col])
-    if date_col in view.columns:
-        view = view.dropna(subset=[date_col]).sort_values(date_col, ascending=False)
-    if view.empty:
-        return None
-    latest = view.iloc[0]
-    prev_value = None
-    if len(view) > 1:
-        prev_value = view.iloc[1][value_col]
-    return {
-        "date": latest[date_col] if date_col in view.columns else None,
-        "value": float(latest[value_col]),
-        "prev_value": float(prev_value)
-        if prev_value is not None and not pd.isna(prev_value)
-        else None,
-    }
-
-
-def _calc_pct_change(current, previous):
-    if current is None or previous is None or previous == 0:
-        return None
-    return (current / previous - 1) * 100
-
-
-def _series_from_df(df, value_col, days):
-    if df is None or df.empty or value_col not in df.columns:
-        return []
-    view = df.copy()
-    if "date" in view.columns:
-        view["date"] = pd.to_datetime(view["date"], errors="coerce")
-    view[value_col] = pd.to_numeric(view[value_col], errors="coerce")
-    view = view.dropna(subset=[value_col])
-    if "date" in view.columns:
-        view = view.dropna(subset=["date"]).sort_values("date")
-    if view.empty:
-        return []
-    view = view.tail(int(days))
-    if "date" in view.columns:
-        view["date"] = view["date"].dt.strftime("%Y-%m-%d")
-    view = view[["date", value_col]].rename(columns={value_col: "value"})
-    return view.to_dict(orient="records")
 
 
 @st.cache_data(ttl="1h")
@@ -103,8 +64,8 @@ def build_external_section(days=120):
         if usdcny_df is not None and not usdcny_df.empty:
             # DataFrame already has 'date' and '4. close' columns
             usdcny_df = usdcny_df.rename(columns={"4. close": "value"})
-        usdcny_metric = _latest_metric_from_df(usdcny_df, "value")
-        usdcny_series = _series_from_df(usdcny_df, "value", days)
+        usdcny_metric = latest_metric_from_df(usdcny_df, "value")
+        usdcny_series = series_from_df(usdcny_df, "value", days)
     except Exception:
         usdcny_metric = None
 
@@ -112,8 +73,8 @@ def build_external_section(days=120):
         btc_df = EconomicIndicators.get_crypto_daily(
             symbol="BTC", market="USD", curDate=fetch_len
         )
-        btc_metric = _latest_metric_from_df(btc_df, "close")
-        btc_series = _series_from_df(btc_df, "close", days)
+        btc_metric = latest_metric_from_df(btc_df, "close")
+        btc_series = series_from_df(btc_df, "close", days)
     except Exception:
         btc_metric = None
 
@@ -121,8 +82,8 @@ def build_external_section(days=120):
         us10y_df = EconomicIndicators.get_treasury_yield(
             maturity="10year", interval="daily", curDate=fetch_len
         )
-        us10y_metric = _latest_metric_from_df(us10y_df, "value")
-        us10y_series = _series_from_df(us10y_df, "value", days)
+        us10y_metric = latest_metric_from_df(us10y_df, "value")
+        us10y_series = series_from_df(us10y_df, "value", days)
     except Exception:
         us10y_metric = None
 
@@ -130,8 +91,8 @@ def build_external_section(days=120):
         xau_df = EconomicIndicators.get_gold_silver_history(
             symbol="XAU", interval="daily", curDate=fetch_len
         )
-        xau_metric = _latest_metric_from_df(xau_df, "value")
-        xau_series = _series_from_df(xau_df, "value", days)
+        xau_metric = latest_metric_from_df(xau_df, "value")
+        xau_series = series_from_df(xau_df, "value", days)
     except Exception:
         xau_metric = None
 
@@ -139,8 +100,8 @@ def build_external_section(days=120):
         wti_df = EconomicIndicators.get_commodities(
             commodity="WTI", interval="daily", curDate=fetch_len
         )
-        wti_metric = _latest_metric_from_df(wti_df, "value")
-        wti_series = _series_from_df(wti_df, "value", days)
+        wti_metric = latest_metric_from_df(wti_df, "value")
+        wti_series = series_from_df(wti_df, "value", days)
     except Exception:
         wti_metric = None
 
@@ -151,7 +112,7 @@ def build_external_section(days=120):
         prev = metric.get("prev_value")
         change = None
         if change_kind == "pct":
-            change = _calc_pct_change(current, prev)
+            change = calc_pct_change(current, prev)
         elif change_kind == "bp":
             if prev is not None:
                 change = (current - prev) * 100
@@ -506,137 +467,23 @@ def display_review_data(review_data, show_modules=None):
             if us10y_date:
                 st.caption(f"\u65e5\u671f: {us10y_date}")
             _render_sparkline(us10y.get("series") or [], "#2f80ed")
-        
-        # AI 宏观分析框架
-        with st.container():
-            st.markdown("#### 🤖 宏观市场分析")
-            
-            # 提取数据序列用于趋势分析
-            def _get_trend_direction(series, threshold=0.02):
-                """判断趋势方向: up/down/sideways"""
-                if not series or len(series) < 5:
-                    return "数据不足"
-                recent = series[-5:]
-                values = [s.get("value", 0) for s in recent if s.get("value")]
-                if len(values) < 2:
-                    return "数据不足"
-                change = (values[-1] - values[0]) / values[0] if values[0] != 0 else 0
-                if change > threshold:
-                    return "上行"
-                elif change < -threshold:
-                    return "下行"
-                return "震荡"
-            
-            usdcny_series = usdcny.get("series") or []
-            btc_series = btc.get("series") or []
-            xau_series = xau.get("series") or []
-            wti_series = wti.get("series") or []
-            us10y_series = us10y.get("series") or []
-            
-            # 趋势状态
-            trends = {
-                "人民币汇率": _get_trend_direction(usdcny_series),
-                "比特币": _get_trend_direction(btc_series),
-                "黄金": _get_trend_direction(xau_series),
-                "WTI原油": _get_trend_direction(wti_series),
-                "美债10Y": _get_trend_direction(us10y_series, 0.05),
-            }
-            
-            # 分析资产间相关性逻辑
-            risk_on_count = 0  # 风险资产偏强
-            risk_off_count = 0  # 避险资产偏强
-            
-            # BTC作为风险资产指标
-            if trends["比特币"] == "上行":
-                risk_on_count += 1
-            elif trends["比特币"] == "下行":
-                risk_off_count += 1
-                
-            # 黄金作为避险资产指标
-            if trends["黄金"] == "上行":
-                risk_off_count += 1
-            elif trends["黄金"] == "下行":
-                risk_on_count += 1
-                
-            # 美债收益率上行=风险承压
-            if trends["美债10Y"] == "上行":
-                risk_off_count += 1
-            elif trends["美债10Y"] == "下行":
-                risk_on_count += 1
-                
-            # 人民币贬值=新兴市场承压
-            if trends["人民币汇率"] == "上行":
-                risk_off_count += 0.5
-            elif trends["人民币汇率"] == "下行":
-                risk_on_count += 0.5
-            
-            # 构建分析报告
-            with st.expander("📊 五类风险资产联动分析", expanded=True):
-                col1, col2 = st.columns(2)
-                
-                with col1:
-                    st.markdown("**📈 各指标趋势状态**")
-                    for asset, trend in trends.items():
-                        emoji = {"上行": "📈", "下行": "📉", "震荡": "➡️", "数据不足": "❓"}.get(trend, "❓")
-                        st.markdown(f"• {asset}: {emoji} {trend}")
-                
-                with col2:
-                    st.markdown("**🔄 资产相关性逻辑**")
-                    if risk_on_count > risk_off_count:
-                        st.success("""**风险偏好升温**  
-                        风险资产(BTC)偏强 + 避险资产(黄金)偏弱  
-                        市场追逐收益，流动性充裕""")
-                    elif risk_off_count > risk_on_count:
-                        st.warning("""**避险情绪主导**  
-                        避险资产(黄金、美债)偏强 + 风险资产承压  
-                        资金寻求安全，不确定性上升""")
-                    else:
-                        st.info("""**信号混合**  
-                        风险/避险资产同步震荡  
-                        市场等待明确方向""")
-                    
-                    st.markdown("---")
-                    st.markdown("**💡 通胀预期**")
-                    if trends["WTI原油"] == "上行" and trends["黄金"] == "上行":
-                        st.warning("商品双涨 → 通胀压力上升")
-                    elif trends["WTI原油"] == "下行" and trends["黄金"] == "下行":
-                        st.success("商品双跌 → 通胀压力缓解")
-                    else:
-                        st.info("商品分化 → 通胀信号不明")
-            
-            # 核心结论
-            st.markdown("**🎯 市场正在定价什么**")
-            conclusions = []
-            
-            # 结论1: 风险偏好状态
-            if risk_on_count >= 2.5:
-                conclusions.append("1. **全球风险偏好偏暖**：BTC等风险资产走强，资金追逐收益，对A股情绪形成正面传导")
-            elif risk_off_count >= 2.5:
-                conclusions.append("1. **全球避险情绪升温**：黄金+美债同步走强，地缘政治或衰退担忧主导，A股承压")
-            else:
-                conclusions.append("1. **风险情绪中性震荡**：多空因素交织，市场等待美联储或地缘局势的明确信号")
-            
-            # 结论2: 汇率与资金流向
-            if trends["人民币汇率"] == "上行":
-                conclusions.append("2. **人民币贬值压力**：USD/CNY上行，外资流出压力+进口成本上升，关注央行干预")
-            elif trends["人民币汇率"] == "下行":
-                conclusions.append("2. **人民币升值动能**：外资回流预期，利好人民币资产，北向资金或回流")
-            else:
-                conclusions.append("2. **汇率相对稳定**：短期双向波动，关注7.3关键心理位突破情况")
-            
-            # 结论3: 利率与估值环境
-            if trends["美债10Y"] == "上行":
-                conclusions.append("3. **全球利率上行**：美债收益率走高压制成长股估值，高股息防御板块占优")
-            elif trends["美债10Y"] == "下行":
-                conclusions.append("3. **降息预期升温**：美债收益率回落利好估值扩张，关注科技/新能源等成长板块")
-            else:
-                conclusions.append("3. **利率环境平稳**：美联储政策预期稳定，个股业绩驱动为主")
-            
-            for conclusion in conclusions:
-                st.markdown(f"{conclusion}")
-            
-            st.caption("*提示：以上分析基于价格趋势的技术推演，不构成投资建议。请结合基本面综合判断。*")
-        
+
+        # AI 宏观分析框架 - 使用解耦后的模块
+        usdcny_series = usdcny.get("series") or []
+        btc_series = btc.get("series") or []
+        xau_series = xau.get("series") or []
+        wti_series = wti.get("series") or []
+        us10y_series = us10y.get("series") or []
+
+        analyze_external_assets(
+            usdcny_series=usdcny_series,
+            btc_series=btc_series,
+            xau_series=xau_series,
+            wti_series=wti_series,
+            us10y_series=us10y_series,
+            show_ui=True,
+        )
+
         st.markdown("---")
 
     if _show("market"):
@@ -667,7 +514,17 @@ def display_review_data(review_data, show_modules=None):
             if not kcb_df.empty:
                 plotK(kcb_df, show_macd=False)
 
-        import os
+        # 三大指数合并 AI 技术分析
+        sh_data_str = sh_df.tail(20).to_string() if not sh_df.empty else ""
+        cyb_data_str = cyb_df.tail(20).to_string() if not cyb_df.empty else ""
+        kcb_data_str = kcb_df.tail(20).to_string() if not kcb_df.empty else ""
+        if sh_data_str or cyb_data_str or kcb_data_str:
+            analyze_index_technical(
+                sh_index_data={"kline_data": sh_data_str, "index_name": "上证指数"},
+                cyb_index_data={"kline_data": cyb_data_str, "index_name": "创业板指数"},
+                kcb_index_data={"kline_data": kcb_data_str, "index_name": "科创板指数"},
+                show_ui=True,
+            )
 
         csv_file = os.path.join("datas", "market_data.csv")
         if os.path.exists(csv_file):
@@ -711,7 +568,9 @@ def display_review_data(review_data, show_modules=None):
                     first_row = st.columns(3)
                     with first_row[0]:
                         if "成交额" in df_history.columns:
-                            amount_df = df_history.dropna(subset=["成交额"]).tail(100).copy()
+                            amount_df = (
+                                df_history.dropna(subset=["成交额"]).tail(100).copy()
+                            )
                             if amount_df.empty:
                                 st.info("暂无成交额数据")
                             else:
@@ -743,7 +602,9 @@ def display_review_data(review_data, show_modules=None):
 
                     with first_row[1]:
                         if "活跃度" in df_history.columns:
-                            activity_df = df_history.dropna(subset=["活跃度"]).tail(100).copy()
+                            activity_df = (
+                                df_history.dropna(subset=["活跃度"]).tail(100).copy()
+                            )
                             if activity_df.empty:
                                 st.info("暂无活跃度数据")
                             else:
@@ -810,9 +671,13 @@ def display_review_data(review_data, show_modules=None):
                             "上涨" in df_history.columns
                             and "下跌" in df_history.columns
                         ):
-                            up_down_df = df_history[
-                                df_history[["上涨", "下跌"]].notna().any(axis=1)
-                            ].tail(100).copy()
+                            up_down_df = (
+                                df_history[
+                                    df_history[["上涨", "下跌"]].notna().any(axis=1)
+                                ]
+                                .tail(100)
+                                .copy()
+                            )
                             if up_down_df.empty:
                                 st.info("暂无涨跌家数数据")
                             else:
@@ -862,9 +727,13 @@ def display_review_data(review_data, show_modules=None):
                             "涨停" in df_history.columns
                             and "跌停" in df_history.columns
                         ):
-                            limit_df = df_history[
-                                df_history[["涨停", "跌停"]].notna().any(axis=1)
-                            ].tail(100).copy()
+                            limit_df = (
+                                df_history[
+                                    df_history[["涨停", "跌停"]].notna().any(axis=1)
+                                ]
+                                .tail(100)
+                                .copy()
+                            )
                             if limit_df.empty:
                                 st.info("暂无涨停/跌停数据")
                             else:
