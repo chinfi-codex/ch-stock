@@ -7,7 +7,7 @@
 
 > 交易日自动更新 + 复盘看板展示，服务日常盘后复盘和次日决策准备
 
-![Dashboard Preview](https://img.shields.io/badge/Dashboard-Streamlit-FF4B4B?style=for-the-badge)
+![Dashboard Preview](docs/preview.png)
 
 ---
 
