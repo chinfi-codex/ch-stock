@@ -172,57 +172,6 @@ def build_external_section(days=120):
     }
 
 
-def _to_iso_date(value):
-    dt = pd.to_datetime(value, errors="coerce")
-    if pd.isna(dt):
-        return None
-    return dt.strftime("%Y-%m-%d")
-
-
-@st.cache_data(ttl="1h")
-def _load_realtime_indices(select_date):
-    end_date = _to_iso_date(select_date) or datetime.datetime.now().strftime("%Y-%m-%d")
-    start_date = (pd.to_datetime(end_date) - pd.Timedelta(days=420)).strftime(
-        "%Y-%m-%d"
-    )
-    sh_df = get_benchmark_kline(
-        start_date=start_date, end_date=end_date, symbol="sh000001"
-    )
-    cyb_df = get_benchmark_kline(
-        start_date=start_date, end_date=end_date, symbol="sz399006"
-    )
-    kcb_df = get_benchmark_kline(
-        start_date=start_date, end_date=end_date, symbol="sh000688"
-    )
-    return {
-        "sh_df": _df_to_records(sh_df),
-        "cyb_df": _df_to_records(cyb_df),
-        "kcb_df": _df_to_records(kcb_df),
-    }
-
-
-def _build_top100_range_from_gainers(gainers_records):
-    if not gainers_records:
-        return {"sh_stocks": [], "cyb_kcb_stocks": []}
-    df = pd.DataFrame(gainers_records)
-    if df.empty or not {"code", "name", "pct", "amount"}.issubset(df.columns):
-        return {"sh_stocks": [], "cyb_kcb_stocks": []}
-    df["pct"] = pd.to_numeric(df["pct"], errors="coerce")
-    df = df.dropna(subset=["pct"]).sort_values("pct", ascending=False).head(100)
-    code6 = df["code"].astype(str).str.extract(r"(\d{6})", expand=False).fillna("")
-    sh_df = df[
-        (code6.str.startswith("6") | code6.str.startswith("0"))
-        & ~code6.str.startswith("688")
-    ]
-    cyb_kcb_df = df[code6.str.startswith("3") | code6.str.startswith("688")]
-    return {
-        "sh_stocks": sh_df[["name", "code", "pct", "amount"]].to_dict(orient="records"),
-        "cyb_kcb_stocks": cyb_kcb_df[["name", "code", "pct", "amount"]].to_dict(
-            orient="records"
-        ),
-    }
-
-
 def _find_market_value_by_keywords(market_data, keywords, default=None):
     if market_data is None or market_data.empty:
         return default
