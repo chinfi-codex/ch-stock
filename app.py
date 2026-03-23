@@ -3,9 +3,7 @@
 import os
 import pandas as pd
 import streamlit as st
-import akshare as ak
 import datetime
-import numpy as np
 import plotly.graph_objects as go
 from tools import (
     plotK,
@@ -23,9 +21,6 @@ from data_sources import (
     _build_pct_distribution,
     get_benchmark_kline,
 )
-import requests
-import json
-import time
 
 
 def _section_title(title):
