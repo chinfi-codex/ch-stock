@@ -19,11 +19,11 @@ def _normalize_top_stocks_df(df):
                 return col
         return None
 
-    name_col = _pick(["鍚嶇О", "name"])
-    code_col = _pick(["浠ｇ爜", "ts_code", "code", "symbol"])
-    pct_col = _pick(["娑ㄨ穼骞?", "pct_chg", "pct", "娑ㄨ穼骞?(%)"])
-    amount_col = _pick(["鎴愪氦棰?", "amount", "鎴愪氦棰?鍏?", "鎴愪氦棰?涓囧厓)"])
-    vol_col = _pick(["鎴愪氦閲?", "vol", "volume"])
+    name_col = _pick(["名称", "name"])
+    code_col = _pick(["代码", "ts_code", "code", "symbol"])
+    pct_col = _pick(["润跌平", "pct_chg", "pct", "润跌平(%)"])
+    amount_col = _pick(["成交额", "amount", "成交额万", "成交额万元"])
+    vol_col = _pick(["成交量", "vol", "volume"])
 
     if not all([name_col, code_col, pct_col, amount_col]):
         return pd.DataFrame()
@@ -32,9 +32,9 @@ def _normalize_top_stocks_df(df):
     if vol_col:
         keep_cols.append(vol_col)
     out = df[keep_cols].copy()
-    out.columns = ["鍚嶇О", "浠ｇ爜", "娑ㄨ穼骞?", "鎴愪氦棰?"] + (["鎴愪氦閲?"] if vol_col else [])
+    out.columns = ["名称", "代码", "润跌平", "成交额"] + (["成交量"] if vol_col else [])
 
-    out["浠ｇ爜"] = out["浠ｇ爜"].astype(str).str.strip()
+    out["代码"] = out["代码"].astype(str).str.strip()
 
     def _normalize_code(value):
         if not value:
@@ -55,17 +55,17 @@ def _normalize_top_stocks_df(df):
                 return f"bj{code}"
         return code
 
-    out["浠ｇ爜"] = out["浠ｇ爜"].apply(_normalize_code)
-    out["娑ㄨ穼骞?"] = pd.to_numeric(out["娑ㄨ穼骞?"], errors="coerce")
-    out["鎴愪氦棰?"] = pd.to_numeric(out["鎴愪氦棰?"], errors="coerce")
+    out["代码"] = out["代码"].apply(_normalize_code)
+    out["润跌平"] = pd.to_numeric(out["润跌平"], errors="coerce")
+    out["成交额"] = pd.to_numeric(out["成交额"], errors="coerce")
     if amount_col == "amount" and "mkt_cap" not in df.columns:
-        out["鎴愪氦棰?"] = out["鎴愪氦棰?"] * 1000
-    if amount_col == "鎴愪氦棰?涓囧厓)":
-        out["鎴愪氦棰?"] = out["鎴愪氦棰?"] * 10000
-    if "鎴愪氦閲?" in out.columns:
-        out["鎴愪氦閲?"] = pd.to_numeric(out["鎴愪氦閲?"], errors="coerce")
+        out["成交额"] = out["成交额"] * 1000
+    if amount_col == "成交额万元":
+        out["成交额"] = out["成交额"] * 10000
+    if "成交量" in out.columns:
+        out["成交量"] = pd.to_numeric(out["成交量"], errors="coerce")
         if vol_col == "vol":
-            out["鎴愪氦閲?"] = out["鎴愪氦閲?"] * 100
+            out["成交量"] = out["成交量"] * 100
     return out
 
 
@@ -100,8 +100,8 @@ def _normalize_concept_kline(df):
             "鏈€楂樹环": "high",
             "鏈€浣庝环": "low",
             "鏀剁洏浠?": "close",
-            "鎴愪氦閲?": "volume",
-            "鎴愪氦棰?": "amount",
+            "成交量": "volume",
+            "成交额": "amount",
         }
     )
     df["date"] = pd.to_datetime(df["date"])
@@ -152,10 +152,10 @@ def _normalize_spot_df(df):
         view = view.dropna(subset=["code", "name", "pct", "amount", "mkt_cap"])
         return view
 
-    code_col = _pick_first_column(df, ["浠ｇ爜", "鑲＄エ浠ｇ爜", "symbol"])
-    name_col = _pick_first_column(df, ["鍚嶇О", "鑲＄エ鍚嶇О", "name"])
-    pct_col = _pick_first_column(df, ["娑ㄨ穼骞?", "娑ㄨ穼骞?(%)", "娑ㄥ箙", "pct_chg"])
-    amount_col = _pick_first_column(df, ["鎴愪氦棰?", "鎴愪氦棰?鍏?", "鎴愪氦棰?涓囧厓)", "amount"])
+    code_col = _pick_first_column(df, ["代码", "鑲＄エ代码", "symbol"])
+    name_col = _pick_first_column(df, ["名称", "鑲＄エ名称", "name"])
+    pct_col = _pick_first_column(df, ["润跌平", "润跌平(%)", "娑ㄥ箙", "pct_chg"])
+    amount_col = _pick_first_column(df, ["成交额", "成交额万", "成交额万元", "amount"])
     mkt_cap_col = _pick_first_column(df, ["鎬诲競鍊?", "鎬诲競鍊?鍏?", "鎬诲競鍊?涓囧厓)", "total_mv"])
 
     if not all([code_col, name_col, pct_col, amount_col, mkt_cap_col]):
@@ -185,8 +185,8 @@ def _normalize_em_kline(df):
         "鏈€浣庝环": "low",
         "鏀剁洏": "close",
         "鏀剁洏浠?": "close",
-        "鎴愪氦閲?": "volume",
-        "鎴愪氦棰?": "amount",
+        "成交量": "volume",
+        "成交额": "amount",
     }
     df = df.rename(columns=rename_map)
     if "date" not in df.columns:

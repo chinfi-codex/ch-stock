@@ -10,12 +10,6 @@ pip install -r requirements.txt
 
 # Run Streamlit app
 streamlit run app.py
-
-# Run scheduler (single execution)
-python review_scheduler.py --run-once --date 2026-03-19
-
-# Run scheduler (daily at 18:30)
-python review_scheduler.py --time 18:30
 ```
 
 ## Code Style Guidelines
@@ -124,7 +118,6 @@ except Exception as e:
 ```
 ch-stock/
 ├── app.py                 # Main Streamlit entry
-├── review_scheduler.py    # Data collection scheduler
 ├── data_sources.py        # Data source interfaces
 ├── requirements.txt
 ├── tools/                 # Utility modules
