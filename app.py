@@ -639,17 +639,17 @@ def display_review_data(review_data, show_modules=None):
                 with col2:
                     st.markdown("**🔄 资产相关性逻辑**")
                     if risk_on_count > risk_off_count:
-                        st.success("**风险偏好升温**  
+                        st.success("""**风险偏好升温**  
                         风险资产(BTC)偏强 + 避险资产(黄金)偏弱  
-                        市场追逐收益，流动性充裕")
+                        市场追逐收益，流动性充裕""")
                     elif risk_off_count > risk_on_count:
-                        st.warning("**避险情绪主导**  
+                        st.warning("""**避险情绪主导**  
                         避险资产(黄金、美债)偏强 + 风险资产承压  
-                        资金寻求安全，不确定性上升")
+                        资金寻求安全，不确定性上升""")
                     else:
-                        st.info("**信号混合**  
+                        st.info("""**信号混合**  
                         风险/避险资产同步震荡  
-                        市场等待明确方向")
+                        市场等待明确方向""")
                     
                     st.markdown("---")
                     st.markdown("**💡 通胀预期**")
