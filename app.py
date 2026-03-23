@@ -563,80 +563,135 @@ def display_review_data(review_data, show_modules=None):
                 st.caption(f"\u65e5\u671f: {us10y_date}")
             _render_sparkline(us10y.get("series") or [], "#2f80ed")
         
-        # AI 总结外围指标
+        # AI 宏观分析框架
         with st.container():
-            st.markdown("#### 🤖 AI 外围指标分析")
+            st.markdown("#### 🤖 宏观市场分析")
             
-            # 构建分析文本
-            analysis_parts = []
+            # 提取数据序列用于趋势分析
+            def _get_trend_direction(series, threshold=0.02):
+                """判断趋势方向: up/down/sideways"""
+                if not series or len(series) < 5:
+                    return "数据不足"
+                recent = series[-5:]
+                values = [s.get("value", 0) for s in recent if s.get("value")]
+                if len(values) < 2:
+                    return "数据不足"
+                change = (values[-1] - values[0]) / values[0] if values[0] != 0 else 0
+                if change > threshold:
+                    return "上行"
+                elif change < -threshold:
+                    return "下行"
+                return "震荡"
             
-            # 汇率分析
-            usdcny_val = usdcny.get("value")
-            usdcny_chg = usdcny.get("change")
-            if usdcny_val and usdcny_chg is not None:
-                trend = "升值" if usdcny_chg < 0 else "贬值"
-                analysis_parts.append(f"**人民币汇率**：{usdcny_val:.4f}，较上日{trend} {abs(usdcny_chg):.2f}%。")
+            usdcny_series = usdcny.get("series") or []
+            btc_series = btc.get("series") or []
+            xau_series = xau.get("series") or []
+            wti_series = wti.get("series") or []
+            us10y_series = us10y.get("series") or []
             
-            # BTC分析
-            btc_val = btc.get("value")
-            btc_chg = btc.get("change")
-            if btc_val and btc_chg is not None:
-                trend = "上涨" if btc_chg > 0 else "下跌"
-                analysis_parts.append(f"**比特币**：${btc_val:,.0f}，{trend} {abs(btc_chg):.2f}%。")
+            # 趋势状态
+            trends = {
+                "人民币汇率": _get_trend_direction(usdcny_series),
+                "比特币": _get_trend_direction(btc_series),
+                "黄金": _get_trend_direction(xau_series),
+                "WTI原油": _get_trend_direction(wti_series),
+                "美债10Y": _get_trend_direction(us10y_series, 0.05),
+            }
             
-            # 黄金分析
-            xau_val = xau.get("value")
-            xau_chg = xau.get("change")
-            if xau_val and xau_chg is not None:
-                trend = "上涨" if xau_chg > 0 else "下跌"
-                analysis_parts.append(f"**黄金**：${xau_val:,.2f}/oz，{trend} {abs(xau_chg):.2f}%，{'避险需求' if xau_chg > 0 else '风险偏好'}升温。")
+            # 分析资产间相关性逻辑
+            risk_on_count = 0  # 风险资产偏强
+            risk_off_count = 0  # 避险资产偏强
             
-            # 原油分析
-            wti_val = wti.get("value")
-            wti_chg = wti.get("change")
-            if wti_val and wti_chg is not None:
-                trend = "上涨" if wti_chg > 0 else "下跌"
-                analysis_parts.append(f"**WTI原油**：${wti_val:,.2f}/bbl，{trend} {abs(wti_chg):.2f}%。")
-            
-            # 美债分析
-            us10y_val = us10y.get("value")
-            us10y_chg = us10y.get("change")
-            if us10y_val and us10y_chg is not None:
-                direction = "上行" if us10y_chg > 0 else "下行"
-                analysis_parts.append(f"**美债10Y**：{us10y_val:.2f}%，{direction} {abs(us10y_chg):.1f}bp，{'通胀预期' if us10y_chg > 0 else '避险'}主导。")
-            
-            if analysis_parts:
-                # 使用类似 Kimi 的卡片式展示
-                st.markdown(
-                    f"""
-                    <div style="background-color: #f8f9fa; border-left: 4px solid #4c6ef5; padding: 16px; border-radius: 8px; margin: 12px 0;">
-                        <div style="color: #495057; font-size: 14px; line-height: 1.8;">
-                            {"<br>".join(analysis_parts)}
-                        </div>
-                    </div>
-                    """,
-                    unsafe_allow_html=True
-                )
+            # BTC作为风险资产指标
+            if trends["比特币"] == "上行":
+                risk_on_count += 1
+            elif trends["比特币"] == "下行":
+                risk_off_count += 1
                 
-                # 综合判断
-                risk_score = 0
-                if usdcny_chg and usdcny_chg > 0.3:
-                    risk_score += 1  # 人民币贬值，A股承压
-                if btc_chg and btc_chg < -5:
-                    risk_score += 1  # BTC大跌，风险偏好下降
-                if xau_chg and xau_chg > 1:
-                    risk_score += 1  # 黄金大涨，避险情绪
-                if us10y_chg and us10y_chg > 5:
-                    risk_score += 1  # 美债收益率上行，资金成本上升
+            # 黄金作为避险资产指标
+            if trends["黄金"] == "上行":
+                risk_off_count += 1
+            elif trends["黄金"] == "下行":
+                risk_on_count += 1
                 
-                if risk_score >= 3:
-                    st.warning("⚠️ **风险提示**：外围环境偏空，注意仓位控制")
-                elif risk_score <= 1:
-                    st.success("✅ **机会提示**：外围环境偏暖，可积极关注")
-                else:
-                    st.info("ℹ️ **中性判断**：外围信号混合，保持观望")
+            # 美债收益率上行=风险承压
+            if trends["美债10Y"] == "上行":
+                risk_off_count += 1
+            elif trends["美债10Y"] == "下行":
+                risk_on_count += 1
+                
+            # 人民币贬值=新兴市场承压
+            if trends["人民币汇率"] == "上行":
+                risk_off_count += 0.5
+            elif trends["人民币汇率"] == "下行":
+                risk_on_count += 0.5
+            
+            # 构建分析报告
+            with st.expander("📊 五类风险资产联动分析", expanded=True):
+                col1, col2 = st.columns(2)
+                
+                with col1:
+                    st.markdown("**📈 各指标趋势状态**")
+                    for asset, trend in trends.items():
+                        emoji = {"上行": "📈", "下行": "📉", "震荡": "➡️", "数据不足": "❓"}.get(trend, "❓")
+                        st.markdown(f"• {asset}: {emoji} {trend}")
+                
+                with col2:
+                    st.markdown("**🔄 资产相关性逻辑**")
+                    if risk_on_count > risk_off_count:
+                        st.success("**风险偏好升温**  
+                        风险资产(BTC)偏强 + 避险资产(黄金)偏弱  
+                        市场追逐收益，流动性充裕")
+                    elif risk_off_count > risk_on_count:
+                        st.warning("**避险情绪主导**  
+                        避险资产(黄金、美债)偏强 + 风险资产承压  
+                        资金寻求安全，不确定性上升")
+                    else:
+                        st.info("**信号混合**  
+                        风险/避险资产同步震荡  
+                        市场等待明确方向")
+                    
+                    st.markdown("---")
+                    st.markdown("**💡 通胀预期**")
+                    if trends["WTI原油"] == "上行" and trends["黄金"] == "上行":
+                        st.warning("商品双涨 → 通胀压力上升")
+                    elif trends["WTI原油"] == "下行" and trends["黄金"] == "下行":
+                        st.success("商品双跌 → 通胀压力缓解")
+                    else:
+                        st.info("商品分化 → 通胀信号不明")
+            
+            # 核心结论
+            st.markdown("**🎯 市场正在定价什么**")
+            conclusions = []
+            
+            # 结论1: 风险偏好状态
+            if risk_on_count >= 2.5:
+                conclusions.append("1. **全球风险偏好偏暖**：BTC等风险资产走强，资金追逐收益，对A股情绪形成正面传导")
+            elif risk_off_count >= 2.5:
+                conclusions.append("1. **全球避险情绪升温**：黄金+美债同步走强，地缘政治或衰退担忧主导，A股承压")
             else:
-                st.info("暂无外围指标数据")
+                conclusions.append("1. **风险情绪中性震荡**：多空因素交织，市场等待美联储或地缘局势的明确信号")
+            
+            # 结论2: 汇率与资金流向
+            if trends["人民币汇率"] == "上行":
+                conclusions.append("2. **人民币贬值压力**：USD/CNY上行，外资流出压力+进口成本上升，关注央行干预")
+            elif trends["人民币汇率"] == "下行":
+                conclusions.append("2. **人民币升值动能**：外资回流预期，利好人民币资产，北向资金或回流")
+            else:
+                conclusions.append("2. **汇率相对稳定**：短期双向波动，关注7.3关键心理位突破情况")
+            
+            # 结论3: 利率与估值环境
+            if trends["美债10Y"] == "上行":
+                conclusions.append("3. **全球利率上行**：美债收益率走高压制成长股估值，高股息防御板块占优")
+            elif trends["美债10Y"] == "下行":
+                conclusions.append("3. **降息预期升温**：美债收益率回落利好估值扩张，关注科技/新能源等成长板块")
+            else:
+                conclusions.append("3. **利率环境平稳**：美联储政策预期稳定，个股业绩驱动为主")
+            
+            for conclusion in conclusions:
+                st.markdown(f"{conclusion}")
+            
+            st.caption("*提示：以上分析基于价格趋势的技术推演，不构成投资建议。请结合基本面综合判断。*")
         
         st.markdown("---")
 
