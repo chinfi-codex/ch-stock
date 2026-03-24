@@ -17,6 +17,7 @@ from tools.financial_data import EconomicIndicators
 from tools.ai_analysis import (
     analyze_external_assets,
     analyze_index_technical,
+    analyze_market_overview,
     format_series_for_ai,
 )
 from tools.utils import (
@@ -815,6 +816,37 @@ def display_review_data(review_data, show_modules=None):
                                 st.plotly_chart(fig_gem_pe, use_container_width=True)
                         else:
                             st.info("暂无创业板市盈率数据")
+
+                    # 准备市场数据用于AI分析
+                    market_data_for_ai = {
+                        "上涨": up_stocks,
+                        "下跌": down_stocks,
+                        "涨停": limit_up,
+                        "跌停": limit_down,
+                        "成交额": f"{latest_row.get('成交额', 0) / 1e9:.2f}万亿"
+                        if latest_row is not None
+                        else "N/A",
+                        "活跃度": f"{activity}%" if activity != "N/A" else "N/A",
+                    }
+
+                    # 添加指数数据
+                    if not sh_df.empty:
+                        market_data_for_ai["indices"] = {
+                            "上证指数": {
+                                "close": sh_df["close"].iloc[-1]
+                                if "close" in sh_df.columns
+                                else sh_df.iloc[-1, 0]
+                            },
+                        }
+
+                    date_str = datetime.datetime.now().strftime("%Y-%m-%d")
+
+                    # 在6张图表下方显示AI市场概况分析
+                    analyze_market_overview(
+                        market_data=market_data_for_ai,
+                        date_str=date_str,
+                        show_ui=True,
+                    )
             except Exception as e:
                 st.warning(f"读取历史市场数据失败: {e}")
 

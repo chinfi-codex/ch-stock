@@ -103,8 +103,7 @@ except Exception as e:
 - Access via: `os.environ.get("TUSHARE_TOKEN")` or `st.secrets.get("tushare_token")`
 
 ### Git Workflow
-- Commit frequently with clear messages
-- Push after completing features
+- Commit everytime finish a task with clear messages
 - Clean up temp/test files before final commit
 - Remove __pycache__ and .pyc files (in .gitignore)
 

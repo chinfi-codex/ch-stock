@@ -246,7 +246,26 @@ def display_ai_analysis(
 
         # 展示结果
         if result:
-            st.markdown(result)
+            with st.container():
+                # 添加浅色底色容器样式
+                st.markdown(
+                    """
+                    <style>
+                    .ai-output-container {
+                        background-color: #f8f9fa;
+                        padding: 15px;
+                        border-radius: 8px;
+                        border-left: 4px solid #4c6ef5;
+                        margin: 10px 0;
+                    }
+                    </style>
+                    """,
+                    unsafe_allow_html=True,
+                )
+                st.markdown(
+                    f'<div class="ai-output-container">{result}</div>',
+                    unsafe_allow_html=True,
+                )
 
             if help_text:
                 st.caption(help_text)
@@ -419,6 +438,7 @@ def analyze_market_overview(
             cache_key=f"market_overview_{date_str}",
             expanded=True,
             spinner_text="🤖 AI 正在分析市场情绪...",
+            show_title=False,
         )
     else:
         return run_ai_analysis(prompt, cache_key=f"market_overview_{date_str}")
