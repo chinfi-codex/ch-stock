@@ -478,3 +478,97 @@ def analyze_index_technical(
         )
     else:
         return run_ai_analysis(prompt, cache_key=cache_key)
+
+
+def format_stock_list_for_classification(stock_list: list) -> str:
+    """格式化股票列表为AI分析文本格式
+
+    Args:
+        stock_list: 股票列表，每项为包含 code, name, pct_chg, total_mv 等字段的字典
+
+    Returns:
+        格式化的字符串
+    """
+    if not stock_list:
+        return "无股票数据"
+
+    lines = []
+    for stock in stock_list:
+        code = stock.get("code", "")
+        name = stock.get("name", "")
+        pct = stock.get("pct_chg", 0)
+        mv = stock.get("total_mv", 0) or stock.get("total_mv_yi", 0)
+
+        # 构建每行信息
+        info_parts = [f"{name}({code})"]
+        if pct:
+            info_parts.append(f"涨幅:{pct:.1f}%")
+        if mv:
+            info_parts.append(f"市值:{mv:.0f}亿")
+
+        lines.append(" - " + " ".join(info_parts))
+
+    return "\n".join(lines)
+
+
+def build_stock_classification_prompt(stock_list: list, group_name: str) -> str:
+    """构建股票分类分析 Prompt
+
+    Args:
+        stock_list: 股票列表，每项为包含 code, name, pct_chg, total_mv 等字段的字典
+        group_name: 分组名称
+
+    Returns:
+        完整的 prompt 字符串
+
+    Raises:
+        FileNotFoundError: 如果模板文件不存在
+    """
+    stock_list_str = format_stock_list_for_classification(stock_list)
+
+    env = get_jinja_env()
+    template = env.get_template("stock_classification.md")
+    return template.render(
+        group_name=group_name,
+        stock_list=stock_list_str,
+    )
+
+
+def analyze_stock_classification(
+    stock_list: list,
+    group_name: str,
+    show_ui: bool = True,
+) -> Optional[str]:
+    """股票列表AI分类分析（便捷函数）
+
+    按行业和概念对股票列表进行智能分类
+
+    Args:
+        stock_list: 股票列表，每项为包含 code, name, pct_chg, total_mv 等字段的字典
+        group_name: 分组名称，用于展示
+        show_ui: 是否在 Streamlit 中展示结果
+
+    Returns:
+        AI 分类分析结果文本
+    """
+    if not stock_list:
+        if show_ui:
+            st.info("暂无股票数据，无法进行分类分析")
+        return None
+
+    prompt = build_stock_classification_prompt(stock_list, group_name)
+
+    cache_key = f"stock_classification_{group_name}_{hash(str(stock_list)) % 10000}"
+
+    if show_ui:
+        return display_ai_analysis(
+            title=f"🤖 AI 股票分类 - {group_name}",
+            prompt=prompt,
+            cache_key=cache_key,
+            expanded=True,
+            spinner_text=f"🤖 AI 正在分析 {group_name} 的股票分类...",
+            show_title=False,
+            timeout=120,
+        )
+    else:
+        return run_ai_analysis(prompt, cache_key=cache_key)
