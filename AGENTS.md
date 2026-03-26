@@ -7,7 +7,6 @@ ch-stock/
 ├── app.py                      # Streamlit 主应用入口
 ├── requirements.txt              # Python 依赖
 ├── data_sources.py             # 数据源接口（统一适配层）
-├── review_scheduler.py         # 自动化任务调度
 │
 ├── tools/                       # 核工具模块
 │   ├── __init__.py            # 统一导出接口

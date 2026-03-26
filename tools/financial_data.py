@@ -18,16 +18,18 @@ logger = logging.getLogger(__name__)
 def _get_av_key():
     """获取 Alpha Vantage API Key，支持 secrets 和环境变量"""
     try:
-        return st.secrets.get('alpha_vantage_key') or os.environ.get('ALPHAVANTAGE_API_KEY')
+        return st.secrets.get("alpha_vantage_key") or os.environ.get(
+            "ALPHAVANTAGE_API_KEY"
+        )
     except Exception:
-        return os.environ.get('ALPHAVANTAGE_API_KEY')
+        return os.environ.get("ALPHAVANTAGE_API_KEY")
 
 
 class EconomicIndicators:
     """经济指标类"""
-    
+
     _last_request_time = 0  # 用于限流
-    
+
     @classmethod
     def _rate_limited_request(cls, url, max_retries=3):
         """带限流的请求，Alpha Vantage 免费版限制每分钟5次"""
@@ -37,14 +39,14 @@ class EconomicIndicators:
                 elapsed = time.time() - cls._last_request_time
                 if elapsed < 12:
                     time.sleep(12 - elapsed)
-                
+
                 response = requests.get(url, timeout=30)
                 cls._last_request_time = time.time()
-                
+
                 if response.status_code == 200:
                     data = response.json()
                     # 检查 API 限流信息
-                    if 'Note' in data or 'Information' in data:
+                    if "Note" in data or "Information" in data:
                         logger.warning(f"Alpha Vantage API limit: {data}")
                         if attempt < max_retries - 1:
                             time.sleep(15)
@@ -54,46 +56,46 @@ class EconomicIndicators:
                     logger.error(f"HTTP {response.status_code}: {response.text}")
                     return {}
             except Exception as e:
-                logger.error(f"Request failed (attempt {attempt+1}): {e}")
+                logger.error(f"Request failed (attempt {attempt + 1}): {e}")
                 if attempt < max_retries - 1:
                     time.sleep(5)
         return {}
-    
+
     @staticmethod
     @st.cache_data(ttl="5m", show_spinner=True)
-    def get_exchangerates_realtime(from_currency='usd', to_currency='cny'):
+    def get_exchangerates_realtime(from_currency="usd", to_currency="cny"):
         """获取实时汇率"""
         av_key = _get_av_key()
         if not av_key:
             logger.error("Alpha Vantage API key not found")
             return None
-        url = f'https://www.alphavantage.co/query?function=CURRENCY_EXCHANGE_RATE&from_currency={from_currency}&to_currency={to_currency}&apikey={av_key}'
+        url = f"https://www.alphavantage.co/query?function=CURRENCY_EXCHANGE_RATE&from_currency={from_currency}&to_currency={to_currency}&apikey={av_key}"
         response = EconomicIndicators._rate_limited_request(url)
         try:
-            return response.get('Realtime Currency Exchange Rate')
+            return response.get("Realtime Currency Exchange Rate")
         except Exception as e:
             logger.error(f"Failed to parse exchange rate: {e}")
             return None
-    
+
     @staticmethod
     @st.cache_data(ttl="0.5day", show_spinner=True)
-    def get_exchangerates_daily(from_currency='usd', to_currency='cny', curDate=60):
+    def get_exchangerates_daily(from_currency="usd", to_currency="cny", curDate=60):
         """获取汇率日线数据"""
         av_key = _get_av_key()
         if not av_key:
             logger.error("Alpha Vantage API key not found")
             return pd.DataFrame()
-        url = f'https://www.alphavantage.co/query?function=FX_DAILY&from_symbol={from_currency}&to_symbol={to_currency}&apikey={av_key}'
+        url = f"https://www.alphavantage.co/query?function=FX_DAILY&from_symbol={from_currency}&to_symbol={to_currency}&apikey={av_key}"
         response = EconomicIndicators._rate_limited_request(url)
         try:
-            time_series_data = response.get('Time Series FX (Daily)')
+            time_series_data = response.get("Time Series FX (Daily)")
             if not time_series_data:
                 logger.warning(f"No FX data in response: {response.keys()}")
                 return pd.DataFrame()
             df = pd.DataFrame(time_series_data).transpose()
             df.index.name = "date"
             df = df.reset_index()
-            df['4. close'] = pd.to_numeric(df['4. close'], errors='coerce')
+            df["4. close"] = pd.to_numeric(df["4. close"], errors="coerce")
             return df.head(curDate)
         except Exception as e:
             logger.error(f"Failed to parse FX data: {e}")
@@ -101,21 +103,21 @@ class EconomicIndicators:
 
     @staticmethod
     @st.cache_data(ttl="0.5day", show_spinner=True)
-    def get_treasury_yield(maturity='10year', interval='daily', curDate=3):
+    def get_treasury_yield(maturity="10year", interval="daily", curDate=3):
         """获取美国国债收益率"""
         av_key = _get_av_key()
         if not av_key:
             logger.error("Alpha Vantage API key not found")
             return pd.DataFrame()
-        url = f'https://www.alphavantage.co/query?function=TREASURY_YIELD&interval={interval}&maturity={maturity}&apikey={av_key}'
+        url = f"https://www.alphavantage.co/query?function=TREASURY_YIELD&interval={interval}&maturity={maturity}&apikey={av_key}"
         response = EconomicIndicators._rate_limited_request(url)
         try:
-            data = response.get('data')
+            data = response.get("data")
             if not data:
                 logger.warning(f"No treasury data in response")
                 return pd.DataFrame()
             df = pd.DataFrame(data)
-            df['value'] = pd.to_numeric(df.get('value'), errors='coerce')
+            df["value"] = pd.to_numeric(df.get("value"), errors="coerce")
             return df.head(curDate)
         except Exception as e:
             logger.error(f"Failed to parse treasury data: {e}")
@@ -155,7 +157,7 @@ class EconomicIndicators:
             df = df[[close_col]].rename(columns={close_col: "close"})
             df.index.name = "date"
             df = df.reset_index()
-            df['close'] = pd.to_numeric(df['close'], errors='coerce')
+            df["close"] = pd.to_numeric(df["close"], errors="coerce")
             return df.head(curDate)
         except Exception as e:
             logger.error(f"Failed to parse equity data: {e}")
@@ -196,7 +198,7 @@ class EconomicIndicators:
             df = df[[close_col]].rename(columns={close_col: "close"})
             df.index.name = "date"
             df = df.reset_index()
-            df['close'] = pd.to_numeric(df['close'], errors='coerce')
+            df["close"] = pd.to_numeric(df["close"], errors="coerce")
             return df.head(curDate)
         except Exception as e:
             logger.error(f"Failed to parse crypto data: {e}")
@@ -204,20 +206,20 @@ class EconomicIndicators:
 
     @staticmethod
     @st.cache_data(ttl="15day", show_spinner=True)
-    def get_federal_rate(interval='monthly'):
+    def get_federal_rate(interval="monthly"):
         """获取美联储利率"""
         av_key = _get_av_key()
         if not av_key:
             logger.error("Alpha Vantage API key not found")
             return pd.DataFrame()
-        url = f'https://www.alphavantage.co/query?function=FEDERAL_FUNDS_RATE&interval={interval}&apikey={av_key}'
+        url = f"https://www.alphavantage.co/query?function=FEDERAL_FUNDS_RATE&interval={interval}&apikey={av_key}"
         response = EconomicIndicators._rate_limited_request(url)
         try:
-            data = response.get('data')
+            data = response.get("data")
             if not data:
                 return pd.DataFrame()
             df = pd.DataFrame(data)
-            df['value'] = pd.to_numeric(df.get('value'), errors='coerce')
+            df["value"] = pd.to_numeric(df.get("value"), errors="coerce")
             return df.head(60)
         except Exception as e:
             logger.error(f"Failed to parse federal rate data: {e}")
@@ -234,16 +236,17 @@ class EconomicIndicators:
         url = f"https://www.alphavantage.co/query?function={commodity.upper()}&interval={interval}&apikey={av_key}"
         response = EconomicIndicators._rate_limited_request(url)
         try:
-            data = response.get('data')
+            data = response.get("data")
             if not data:
                 logger.warning(f"No commodities data for {commodity}")
                 return pd.DataFrame()
             df = pd.DataFrame(data)
-            df['value'] = pd.to_numeric(df.get('value'), errors='coerce')
+            df["value"] = pd.to_numeric(df.get("value"), errors="coerce")
             return df.head(curDate)
         except Exception as e:
             logger.error(f"Failed to parse commodities data: {e}")
             return pd.DataFrame()
+
     @staticmethod
     @st.cache_data(ttl="0.5day", show_spinner=True)
     def get_gold_silver_history(symbol="XAU", interval="daily", curDate=60):
@@ -276,12 +279,11 @@ class EconomicIndicators:
                     if col in df.columns:
                         df = df.rename(columns={col: "value"})
                         break
-            df['value'] = pd.to_numeric(df.get('value'), errors='coerce')
+            df["value"] = pd.to_numeric(df.get("value"), errors="coerce")
             return df.head(curDate)
         except Exception as e:
             logger.error(f"Failed to parse gold/silver data: {e}")
             return pd.DataFrame()
-
 
     @staticmethod
     @st.cache_data(ttl="0.5day", show_spinner=True)
@@ -312,7 +314,7 @@ class EconomicIndicators:
         try:
             return pro.cn_soci(limit=limit)
         except Exception:
-            return pro.query('cn_soci', limit=limit)
+            return pro.query("cn_soci", limit=limit)
 
     @staticmethod
     @st.cache_data(ttl="0.5day", show_spinner=True)
@@ -320,101 +322,3 @@ class EconomicIndicators:
         """获取中国 PMI 数据"""
         pro = ts.pro_api(st.secrets.get("tushare_token", ""))
         return pro.cn_pmi(limit=limit)
-
-
-@st.cache_data(ttl="1h", show_spinner=True)
-def get_fed_rate_cut_probability():
-    """
-    获取 Polymarket 上美联储下一次降息概率（独立方法）
-    逻辑参考 py-clob-client 的 CLOB 示例，直接使用 HTTP 请求实现。
-    """
-    try:
-        url = "https://clob.polymarket.com/markets"
-        headers = {
-            "Accept": "application/json",
-            "User-Agent": "Mozilla/5.0",
-        }
-
-        resp = requests.get(
-            url,
-            headers=headers,
-            params={"active": "true", "limit": 200},
-            timeout=10,
-        )
-        if resp.status_code != 200:
-            return None
-
-        markets = resp.json()
-
-        fed_markets = []
-        for m in markets:
-            q = (m.get("question") or "").lower()
-            title = (m.get("title") or "").lower()
-            text = f"{q} {title}"
-            if ("fed" in text or "federal reserve" in text) and (
-                "rate cut" in text
-                or "cut rates" in text
-                or "lower rates" in text
-                or "reduce rates" in text
-            ):
-                fed_markets.append(m)
-
-        if not fed_markets:
-            return None
-
-        market = fed_markets[0]
-
-        # 优先使用 outcomes 中 yes 的价格
-        outcomes = market.get("outcomes") or []
-        for outcome in outcomes:
-            name = (outcome.get("name") or outcome.get("outcome") or "").lower()
-            if "yes" in name:
-                price = float(outcome.get("price") or 0)
-                if price > 0:
-                    return {
-                        "probability": price * 100,
-                        "question": market.get("question") or market.get("title", ""),
-                        "market_url": f"https://polymarket.com/event/{market.get('slug', market.get('id', ''))}",
-                    }
-
-        # 兼容：若有 price 字段，则直接使用
-        if "price" in market:
-            price = float(market.get("price") or 0)
-            if price > 0:
-                return {
-                    "probability": price * 100,
-                    "question": market.get("question") or market.get("title", ""),
-                    "market_url": f"https://polymarket.com/event/{market.get('slug', market.get('id', ''))}",
-                }
-
-        # 备用：根据 conditionId 读 orderbook
-        condition_id = market.get("conditionId") or market.get("id")
-        if condition_id:
-            try:
-                ob_url = f"https://clob.polymarket.com/orderbook/{condition_id}"
-                ob_resp = requests.get(ob_url, headers=headers, timeout=10)
-                if ob_resp.status_code == 200:
-                    ob = ob_resp.json()
-                    yes = ob.get("yes")
-                    if isinstance(yes, dict):
-                        bids = yes.get("bids") or []
-                        if bids:
-                            top = bids[0]
-                            price = (
-                                float(top.get("price"))
-                                if isinstance(top, dict)
-                                else float(top)
-                            )
-                            if price > 0:
-                                return {
-                                    "probability": price * 100,
-                                    "question": market.get("question")
-                                    or market.get("title", ""),
-                                    "market_url": f"https://polymarket.com/event/{market.get('slug', market.get('id', ''))}",
-                                }
-            except Exception:
-                pass
-
-        return None
-    except Exception:
-        return None

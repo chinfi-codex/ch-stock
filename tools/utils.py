@@ -176,45 +176,6 @@ def convert_to_ak_code(code: str) -> str:
     return code.lower()
 
 
-def extract_code6(value: str) -> str:
-    """
-    从字符串中提取6位股票代码
-
-    Args:
-        value: 包含股票代码的字符串
-
-    Returns:
-        str: 6位数字股票代码，如果未找到则返回空字符串
-    """
-    m = re.search(r"(\d{6})", str(value))
-    return m.group(1) if m else ""
-
-
-def classify_board(code6: str) -> str:
-    """
-    根据6位股票代码判断所属板块
-
-    Args:
-        code6: 6位股票代码
-
-    Returns:
-        str: 板块名称 (主板/创业板/科创板/北交所)
-    """
-    if not code6 or len(code6) != 6:
-        return "未知"
-
-    if code6.startswith("688") or code6.startswith("689"):
-        return "科创板"
-    if code6.startswith(("300", "301")):
-        return "创业板"
-    if code6.startswith("8") or code6.startswith("4"):
-        return "北交所"
-    if code6.startswith(("0", "3", "6")):
-        return "主板"
-
-    return "未知"
-
-
 # =============================================================================
 # 数据处理工具函数
 # =============================================================================
@@ -321,25 +282,6 @@ def filter_st_bj_stocks(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
-def pick_first_column(df: pd.DataFrame, candidates: list) -> Optional[str]:
-    """
-    从候选列名中选择第一个存在于 DataFrame 中的列名
-
-    Args:
-        df: DataFrame
-        candidates: 候选列名列表
-
-    Returns:
-        Optional[str]: 存在的列名，如果都不存在则返回 None
-    """
-    if df is None or df.empty:
-        return None
-    for name in candidates:
-        if name in df.columns:
-            return name
-    return None
-
-
 def to_number(series: Union[pd.Series, Any]) -> Optional[pd.Series]:
     """
     将 Series 转换为数值类型，移除百分号
@@ -354,25 +296,6 @@ def to_number(series: Union[pd.Series, Any]) -> Optional[pd.Series]:
         return None
     s = series.astype(str).str.replace("%", "", regex=False)
     return pd.to_numeric(s, errors="coerce")
-
-
-def normalize_trade_date(trade_date: Any) -> tuple:
-    """
-    标准化交易日期
-
-    Args:
-        trade_date: 日期（支持多种格式）
-
-    Returns:
-        tuple: (yyyyMMdd 格式字符串, date 对象)
-
-    Raises:
-        ValueError: 如果日期格式无效
-    """
-    dt = pd.to_datetime(trade_date, errors="coerce")
-    if pd.isna(dt):
-        raise ValueError(f"Invalid trade date: {trade_date}")
-    return dt.strftime("%Y%m%d"), dt.date()
 
 
 def scrape_with_jina_reader(
@@ -580,3 +503,61 @@ def weibo_comments(wid):
             text_raw = li["text_raw"]
             comments.append(text_raw)
     return comments
+
+
+# =============================================================================
+# 数据存储工具函数（从 storage_utils.py 迁移）
+# =============================================================================
+
+import json
+from datetime import date, datetime
+
+REVIEW_DIR = os.path.join("datas", "reviews")
+
+
+def _json_default(obj):
+    if isinstance(obj, (datetime, date)):
+        return obj.isoformat()
+    if hasattr(obj, "item"):
+        try:
+            return obj.item()
+        except Exception:
+            pass
+    return str(obj)
+
+
+def _normalize_date_str(value):
+    dt = pd.to_datetime(value, errors="coerce")
+    if pd.isna(dt):
+        return None
+    return dt.strftime("%Y-%m-%d")
+
+
+def _resolve_review_dir(review_dir=None):
+    return os.fspath(review_dir) if review_dir else REVIEW_DIR
+
+
+def ensure_review_dir(review_dir=None):
+    target_dir = _resolve_review_dir(review_dir)
+    os.makedirs(target_dir, exist_ok=True)
+    return target_dir
+
+
+def _save_review_file(date_str, payload, review_dir=None):
+    target_dir = ensure_review_dir(review_dir)
+    file_path = os.path.join(target_dir, f"{date_str}.json")
+    with open(file_path, "w", encoding="utf-8") as f:
+        json.dump(payload, f, ensure_ascii=False, indent=2, default=_json_default)
+    return file_path
+
+
+def save_review_data(date, data, review_dir=None):
+    date_str = _normalize_date_str(date)
+    if not date_str:
+        raise ValueError(f"Invalid review date: {date}")
+
+    payload = dict(data or {})
+    payload["saved_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    payload["date"] = date_str
+
+    return _save_review_file(date_str, payload, review_dir=review_dir)

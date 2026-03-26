@@ -76,7 +76,6 @@ streamlit run app.py
 ```
 ch-stock/
 ├── app.py                      # Streamlit 主应用
-├── review_scheduler.py         # 市场数据更新脚本
 ├── data_sources.py             # 数据源接口
 ├── tools/
 │   ├── market_data.py          # 市场数据获取
@@ -90,18 +89,6 @@ ch-stock/
 │   └── reviews/                # 每日复盘JSON数据
 ├── requirements.txt
 └── README.md
-```
-
----
-
-## 🛠️ 手动更新数据
-
-```bash
-# 更新当日数据
-python review_scheduler.py --run-once
-
-# 指定日期更新
-python review_scheduler.py --run-once --date 2026-03-23
 ```
 
 ---

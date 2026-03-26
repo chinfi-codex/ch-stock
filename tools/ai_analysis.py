@@ -480,63 +480,6 @@ def analyze_index_technical(
         return run_ai_analysis(prompt, cache_key=cache_key)
 
 
-def build_industry_research_prompt(
-    topic_name: str,
-    framework_sections: List[str],
-    source_name: str,
-    source_summary: str,
-    change_type: str,
-    latest_approved_summary: str = "",
-) -> str:
-    """构建行业研究分析 Prompt。"""
-    env = get_jinja_env()
-    template = env.get_template("industry_research.md")
-    return template.render(
-        topic_name=topic_name,
-        framework_sections=framework_sections,
-        source_name=source_name,
-        source_summary=source_summary,
-        change_type=change_type,
-        latest_approved_summary=latest_approved_summary,
-    )
-
-
-def analyze_industry_research(
-    topic_name: str,
-    framework_sections: List[str],
-    source_name: str,
-    source_summary: str,
-    change_type: str,
-    latest_approved_summary: str = "",
-    show_ui: bool = True,
-) -> Optional[str]:
-    """行业研究 AI 分析入口。"""
-    prompt = build_industry_research_prompt(
-        topic_name=topic_name,
-        framework_sections=framework_sections,
-        source_name=source_name,
-        source_summary=source_summary,
-        change_type=change_type,
-        latest_approved_summary=latest_approved_summary,
-    )
-    cache_key = (
-        f"industry_research_{topic_name}_{source_name}_{change_type}_"
-        f"{hash(source_summary) % 100000}"
-    )
-
-    if show_ui:
-        return display_ai_analysis(
-            title=f"行业研究分析 - {topic_name}",
-            prompt=prompt,
-            cache_key=cache_key,
-            expanded=True,
-            spinner_text=f"正在分析 {topic_name} 的最新资料...",
-            show_title=False,
-            timeout=180,
-        )
-    return run_ai_analysis(prompt, cache_key=cache_key, timeout=180)
-
-
 def format_stock_list_for_classification(stock_list: list) -> str:
     """格式化股票列表为AI分析文本格式
 
