@@ -8,13 +8,9 @@
 import os
 import json
 import datetime
-import time
 
 import streamlit as st
 import pandas as pd
-
-from tools import plotK
-from tools.kline_data import get_ak_price_df
 
 
 # 关注列表数据文件路径
@@ -143,49 +139,6 @@ def main():
                 hide_index=True,
                 key="watchlist_table",
             )
-
-        st.markdown("---")
-
-        # 显示每只股票的详细信息
-        st.markdown("### 📈 股票详情")
-
-        for idx, stock in enumerate(watchlist):
-            code = stock.get("code", "")
-            name = stock.get("name", "")
-            add_time = stock.get("add_time", "")
-
-            # 使用 expander 展示
-            with st.expander(
-                f"**{name}** ({code}) - 添加时间：{add_time}", expanded=False
-            ):
-                # 删除按钮
-                if st.button(
-                    f"❌ 移除关注", key=f"remove_{code}", use_container_width=True
-                ):
-                    success, msg = remove_stock_from_watchlist(code)
-                    if success:
-                        st.toast(msg, icon="✅")
-                        st.rerun()
-                    else:
-                        st.toast(msg, icon="⚠️")
-
-                # K 线图
-                try:
-                    with st.spinner(f"正在加载 {name} 的 K 线数据..."):
-                        price_df = get_ak_price_df(code, count=60)
-
-                    if price_df is not None and not price_df.empty:
-                        plotK(
-                            price_df,
-                            k="d",
-                            plot_type="candle",
-                            ma_line=(5, 10, 20),
-                            container=st,
-                        )
-                    else:
-                        st.warning(f"{name} 暂无 K 线数据")
-                except Exception as e:
-                    st.warning(f"{name} 获取 K 线失败: {str(e)}")
 
 
 if __name__ == "__main__":
