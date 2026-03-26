@@ -308,6 +308,11 @@ def main():
 
     _section_title("📊 特征分组")
 
+    # AI分析开关
+    enable_ai = st.checkbox(
+        "开启AI分析", value=False, help="开启后将使用AI对股票进行分类分析"
+    )
+
     # ---- 分组1: 容量上涨股票 ----
     st.markdown(
         "### 💪 容量上涨（成交>5亿，涨幅>8%，市值50-200亿，5日涨幅<25%，去除北交所）"
@@ -322,11 +327,12 @@ def main():
         st.caption(f"共 {len(capacity_stocks)} 只")
 
         # AI 分析 - 容量上涨股票分类
-        analyze_stock_classification(
-            stock_list=capacity_stocks,
-            group_name="容量上涨股票",
-            show_ui=True,
-        )
+        if enable_ai:
+            analyze_stock_classification(
+                stock_list=capacity_stocks,
+                group_name="容量上涨股票",
+                show_ui=True,
+            )
 
         # 一行4列展示 K 线图
         stocks_per_row = 4
@@ -393,11 +399,12 @@ def main():
             st.caption(f"共 {len(early_zt)} 只")
 
             # AI 分析 - 10:30前涨停股票分类
-            analyze_stock_classification(
-                stock_list=early_zt,
-                group_name="10:30前涨停",
-                show_ui=True,
-            )
+            if enable_ai:
+                analyze_stock_classification(
+                    stock_list=early_zt,
+                    group_name="10:30前涨停",
+                    show_ui=True,
+                )
 
             # 一行4列展示 K 线图
             stocks_per_row = 4

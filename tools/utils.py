@@ -375,13 +375,6 @@ def normalize_trade_date(trade_date: Any) -> tuple:
     return dt.strftime("%Y%m%d"), dt.date()
 
 
-# 为兼容旧代码，保留别名
-_to_ts_code = convert_to_ts_code
-_to_number = to_number
-_pick_first_column = pick_first_column
-_normalize_trade_date = normalize_trade_date
-
-
 def scrape_with_jina_reader(
     url: str, title: str = "", output_dir: str = "", save_to_file: bool = True
 ) -> dict:
@@ -515,50 +508,6 @@ def get_stock_list():
     return df
 
 
-def df_drop_duplicated(df, subset=None, keep="first"):
-    """删除重复数据"""
-    return df.drop_duplicates(subset=subset, keep=keep)
-
-
-def _get_pushplus_token() -> str:
-    """获取 PushPlus Token，优先级：环境变量 > streamlit secrets"""
-    token = os.environ.get("PUSHPLUS_TOKEN", "").strip()
-    if token:
-        return token
-    try:
-        token = st.secrets.get("pushplus_token", "")
-        if token:
-            return token
-    except Exception:
-        pass
-    return ""
-
-
-def notify_pushplus(title, content, topic):
-    """推送消息到PushPlus"""
-    token = _get_pushplus_token()
-    if not token:
-        logger.error(
-            "Missing PUSHPLUS_TOKEN: 请设置环境变量或在 .streamlit/secrets.toml 中配置"
-        )
-        return None
-
-    url = "http://www.pushplus.plus/send"
-    payload = {
-        "token": token,
-        "title": title,
-        "content": content,
-        "topic": topic,
-        "template": "html",
-    }
-    headers = {
-        "User-Agent": "Apifox/1.0.0 (https://apifox.com)",
-        "Content-Type": "application/json",
-    }
-    resp = requests.post(url, json=payload, headers=headers)
-    return resp
-
-
 def get_xueqiu_stock_topics(stock_code, cookie, page_id=3):
     """获取雪球股票话题"""
     headers = {
@@ -631,68 +580,3 @@ def weibo_comments(wid):
             text_raw = li["text_raw"]
             comments.append(text_raw)
     return comments
-
-
-class FileInfo:
-    """文件信息类"""
-
-    def __init__(self, filename, created_date, content):
-        self.filename = filename
-        self.created_date = created_date
-        self.content = content
-
-
-def read_files_by_condition(
-    directory, keyword=None, start_date=None, end_date=None, encoding="utf-8"
-):
-    """
-    从本地指定目录中按条件读取文件内容，条件包括关键词、创建日期
-
-    参数:
-        directory (str): 目录路径
-        keyword (str, optional): 文件名或内容需包含的关键词
-        start_date (str or datetime.date, optional): 文件创建日期起始（包含），格式'YYYY-MM-DD'或date对象
-        end_date (str or datetime.date, optional): 文件创建日期结束（包含），格式'YYYY-MM-DD'或date对象
-        encoding (str): 文件编码，默认为'utf-8'
-
-    返回:
-        list of FileInfo: 每个FileInfo对象包含文件名称、创建日期、文件内容文本
-    """
-    results = []
-    if isinstance(start_date, str):
-        start_date = datetime.datetime.strptime(start_date, "%Y-%m-%d").date()
-    if isinstance(end_date, str):
-        end_date = datetime.datetime.strptime(end_date, "%Y-%m-%d").date()
-
-    for root, _, files in os.walk(directory):
-        for fname in files:
-            fpath = os.path.join(root, fname)
-            try:
-                stat = os.stat(fpath)
-                created_date = datetime.date.fromtimestamp(stat.st_ctime)
-                # 日期条件判断
-                if start_date and created_date < start_date:
-                    continue
-                if end_date and created_date > end_date:
-                    continue
-                # 关键词条件判断（文件名或内容）
-                content = None
-                if keyword:
-                    if keyword not in fname:
-                        with open(fpath, "r", encoding=encoding, errors="ignore") as f:
-                            file_content = f.read()
-                        if keyword not in file_content:
-                            continue
-                        content = file_content
-                    else:
-                        with open(fpath, "r", encoding=encoding, errors="ignore") as f:
-                            content = f.read()
-                else:
-                    with open(fpath, "r", encoding=encoding, errors="ignore") as f:
-                        content = f.read()
-                results.append(
-                    FileInfo(filename=fpath, created_date=created_date, content=content)
-                )
-            except Exception:
-                continue
-    return results

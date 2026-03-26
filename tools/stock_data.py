@@ -16,6 +16,7 @@ import os
 import tushare as ts
 import mplfinance as mpf
 import matplotlib.dates as mdates
+from .utils import convert_to_ts_code
 
 # 配置日志
 logging.basicConfig(
@@ -30,37 +31,6 @@ TS_TOKEN = os.getenv(
 _ts_pro_client = None
 
 
-def get_next_tradeday(date):
-    """获取下一个交易日"""
-    if date == datetime.datetime.today():
-        return date
-    day_of_week = date.weekday()
-
-    if day_of_week >= 0 and day_of_week <= 3:  # 周一到周四
-        next_date = date + datetime.timedelta(days=1)
-    elif day_of_week == 4:  # 周五
-        next_date = date + datetime.timedelta(days=3)  # 加3天以跳过周末
-    else:  # 周六或周日
-        return None
-    return next_date.strftime("%Y-%m-%d")
-
-
-def get_stock_short_name(code):
-    """获取股票简称"""
-    try:
-        stock_info_df = ak.stock_individual_info_em(symbol=code)
-
-        if "股票简称" in stock_info_df["item"].tolist():
-            short_name_index = stock_info_df["item"].tolist().index("股票简称")
-            short_name = stock_info_df["value"][short_name_index]
-            return short_name
-        else:
-            return "股票简称列不存在或数据有误。"
-    except Exception as e:
-        logger.error(f"获取股票简称失败: {str(e)}")
-        return f"获取简称失败: {code}"
-
-
 def _get_ts_client():
     """惰性初始化tushare客户端"""
     global _ts_pro_client
@@ -72,49 +42,12 @@ def _get_ts_client():
     return _ts_pro_client
 
 
-def _convert_to_ts_code(code):
-    """将多种代码格式转换为tushare ts_code"""
-    if code is None:
-        raise ValueError("股票代码不能为空")
-
-    code = str(code).strip()
-    upper_code = code.upper()
-
-    if "." in upper_code:
-        prefix, suffix = upper_code.split(".", 1)
-        suffix = suffix.replace("SS", "SH")
-        if suffix in {"SH", "SZ", "BJ"}:
-            return f"{prefix}.{suffix}"
-
-    if (
-        upper_code.startswith("SZ")
-        or upper_code.startswith("SH")
-        or upper_code.startswith("BJ")
-    ):
-        body = upper_code[2:]
-        suffix = upper_code[:2]
-        return f"{body}.{suffix}"
-
-    if len(code) == 6 and code.isdigit():
-        if code.startswith(("0", "3")):
-            suffix = "SZ"
-        elif code.startswith(("6", "9")):
-            suffix = "SH"
-        elif code.startswith("8"):
-            suffix = "BJ"
-        else:
-            suffix = "SZ"
-        return f"{code}.{suffix}"
-
-    return upper_code
-
-
 def get_tushare_price_df(code, end_date=None, count=60):
     """使用tushare获取股票日K线数据"""
     if end_date is None:
         end_date = datetime.datetime.now().strftime("%Y%m%d")
 
-    ts_code = _convert_to_ts_code(code)
+    ts_code = convert_to_ts_code(code)
     pro = _get_ts_client()
 
     end_dt = datetime.datetime.strptime(end_date, "%Y%m%d")
@@ -156,7 +89,7 @@ def get_tushare_weekly_df(code, end_date=None, count=60):
     if end_date is None:
         end_date = datetime.datetime.now().strftime("%Y%m%d")
 
-    ts_code = _convert_to_ts_code(code)
+    ts_code = convert_to_ts_code(code)
     pro = _get_ts_client()
 
     # 周线需要更多天数来获取足够的数据
@@ -186,7 +119,7 @@ def get_tushare_monthly_df(code, end_date=None, count=60):
     if end_date is None:
         end_date = datetime.datetime.now().strftime("%Y%m%d")
 
-    ts_code = _convert_to_ts_code(code)
+    ts_code = convert_to_ts_code(code)
     pro = _get_ts_client()
 
     # 月线需要更多天数来获取足够的数据
@@ -443,42 +376,6 @@ def plotK(
 
     # 关闭图形以释放内存
     plt.close(fig)
-
-
-class PriceData:
-    """股票价格数据类"""
-
-    def __init__(self, code):
-        self.code = code
-
-    def buy_date_price(self, buy_date):
-        """获取买入日期价格"""
-        df = get_ak_price_df(self.code, buy_date.strftime("%Y%m%d"), count=2)
-        return df.to_dict("records")
-
-    def next_tradeday_price(self, buy_date):
-        """获取下一个交易日价格"""
-        next_tradeday = get_next_tradeday(buy_date).replace("-", "")
-        day_df = get_ak_price_df(self.code, next_tradeday, count=1)
-        hour_df = ak.stock_zh_a_hist_min_em(
-            self.code, start_date=next_tradeday, end_date=next_tradeday, period="30"
-        )
-        price_dict = {
-            "code": self.code,
-            "day": day_df.to_dict("records"),
-            "hours": hour_df.to_dict("records"),
-        }
-        return price_dict
-
-    def plotDayK(self, buy_date, container=st):
-        """绘制日K线图"""
-        df = get_ak_price_df(self.code, buy_date.strftime("%Y%m%d"))
-        plotK(df, container=container)
-
-    def plotIntervalK(self, buy_date, container=st):
-        """绘制分时K线图"""
-        df = get_ak_interval_price_df(self.code, buy_date.strftime("%Y%m%d"))
-        plotK(df, plot_type="line", container=container)
 
 
 class StockTechnical:

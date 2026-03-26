@@ -15,6 +15,7 @@ mplfinance
 akshare
 tushare
 websocket-client
+PyPDF2>=3.0.0
 
 # Web 框架
 flask>=2.0.0
