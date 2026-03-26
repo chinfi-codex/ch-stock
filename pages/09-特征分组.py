@@ -300,6 +300,174 @@ def get_capacity_stocks():
         return []
 
 
+# ========== 关注列表管理 ==========
+
+# 关注列表数据文件路径
+WATCHLIST_FILE = "datas/watchlist.json"
+
+
+@st.cache_data(ttl="5m")
+def load_watchlist():
+    """
+    加载关注列表
+
+    Returns:
+        dict: 包含 watchlist 列表的字典
+    """
+    if not os.path.exists(WATCHLIST_FILE):
+        return {"watchlist": []}
+
+    try:
+        with open(WATCHLIST_FILE, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception as e:
+        st.warning(f"加载关注列表失败: {e}")
+        return {"watchlist": []}
+
+
+def save_watchlist(watchlist_data):
+    """
+    保存关注列表到文件
+
+    Args:
+        watchlist_data: 包含 watchlist 列表的字典
+
+    Returns:
+        bool: 保存是否成功
+    """
+    try:
+        os.makedirs("datas", exist_ok=True)
+        with open(WATCHLIST_FILE, "w", encoding="utf-8") as f:
+            json.dump(watchlist_data, f, ensure_ascii=False, indent=2)
+        return True
+    except Exception as e:
+        st.error(f"保存关注列表失败: {e}")
+        return False
+
+
+def add_stock_to_watchlist(code, name):
+    """
+    添加股票到关注列表
+
+    Args:
+        code: 股票代码
+        name: 股票名称
+
+    Returns:
+        tuple: (bool, str) - 是否成功，消息
+    """
+    watchlist_data = load_watchlist()
+
+    if "watchlist" not in watchlist_data:
+        watchlist_data["watchlist"] = []
+
+    # 检查是否已存在
+    watched_codes = [item.get("code") for item in watchlist_data["watchlist"]]
+    if code in watched_codes:
+        return False, "已关注"
+
+    # 添加新股票
+    watchlist_data["watchlist"].append(
+        {
+            "code": code,
+            "name": name,
+            "add_time": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        }
+    )
+
+    if save_watchlist(watchlist_data):
+        return True, "关注成功"
+    return False, "保存失败"
+
+
+def is_watched(code, watchlist_data=None):
+    """
+    检查股票是否已关注
+
+    Args:
+        code: 股票代码
+        watchlist_data: 关注列表数据（可选）
+
+    Returns:
+        bool: 是否已关注
+    """
+    if watchlist_data is None:
+        watchlist_data = load_watchlist()
+
+    if "watchlist" not in watchlist_data:
+        return False
+
+    watched_codes = [item.get("code") for item in watchlist_data["watchlist"]]
+    return code in watched_codes
+
+
+@st.fragment
+def stock_card_with_watch(stock, stock_type="capacity"):
+    """
+    股票卡片，包含关注功能（使用 fragment 实现局部刷新）
+
+    Args:
+        stock: 股票数据字典
+        stock_type: 股票类型（"capacity" 或 "zt"）
+    """
+    code = stock.get("code", "")
+    name = stock.get("name", "")
+
+    # 判断是否已关注
+    watchlist_data = load_watchlist()
+    watched = is_watched(code, watchlist_data)
+
+    with st.container():
+        # 股票信息行
+        if stock_type == "capacity":
+            pct = stock.get("pct_chg", 0)
+            amt = stock.get("amount_yi", 0)
+            mv = stock.get("total_mv_yi", 0)
+            title = f"**{name}** ({code}) 涨:{pct:.1f}% 额:{amt}亿 市:{mv}亿"
+        else:
+            zdt_time = parse_zdt_time(stock.get("zdttm"))
+            total_mv = stock.get("total_mv", 0)
+            title = f"**{name}** ({code}) 封板:{zdt_time} 市:{total_mv:.0f}亿"
+
+        st.markdown(title)
+
+        # 关注按钮行
+        if not watched:
+            if st.button(
+                "⭐ 关注", key=f"watch_{stock_type}_{code}", use_container_width=True
+            ):
+                success, msg = add_stock_to_watchlist(code, name)
+                if success:
+                    st.toast(f"{name} {msg}", icon="✅")
+                else:
+                    st.toast(f"{name} {msg}", icon="⚠️")
+                st.rerun(scope="fragment")
+        else:
+            st.button(
+                "✅ 已关注",
+                key=f"watched_{stock_type}_{code}",
+                use_container_width=True,
+                disabled=True,
+            )
+
+        # K 线图
+        try:
+            time.sleep(0.3)  # 300ms 延时
+            price_df = get_ak_price_df(code, count=60)
+            if price_df is not None and not price_df.empty:
+                plotK(
+                    price_df,
+                    k="d",
+                    plot_type="candle",
+                    ma_line=(5, 10, 20),
+                    container=st,
+                )
+            else:
+                st.warning(f"{name} 无 K 线数据")
+        except Exception as e:
+            st.warning(f"{name} 获取 K 线失败")
+
+
 # ========== 页面主函数 ==========
 
 
