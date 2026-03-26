@@ -306,28 +306,33 @@ def get_capacity_stocks():
 WATCHLIST_FILE = "datas/watchlist.json"
 
 
-@st.cache_data(ttl="5m")
-def load_watchlist():
+def _init_watchlist_state():
+    """初始化关注列表到 session_state"""
+    if "watchlist_data" not in st.session_state:
+        if not os.path.exists(WATCHLIST_FILE):
+            st.session_state.watchlist_data = {"watchlist": []}
+        else:
+            try:
+                with open(WATCHLIST_FILE, "r", encoding="utf-8") as f:
+                    st.session_state.watchlist_data = json.load(f)
+            except Exception as e:
+                st.session_state.watchlist_data = {"watchlist": []}
+
+
+def get_watchlist():
     """
-    加载关注列表
+    获取关注列表（从 session_state）
 
     Returns:
         dict: 包含 watchlist 列表的字典
     """
-    if not os.path.exists(WATCHLIST_FILE):
-        return {"watchlist": []}
-
-    try:
-        with open(WATCHLIST_FILE, "r", encoding="utf-8") as f:
-            return json.load(f)
-    except Exception as e:
-        st.warning(f"加载关注列表失败: {e}")
-        return {"watchlist": []}
+    _init_watchlist_state()
+    return st.session_state.watchlist_data
 
 
 def save_watchlist(watchlist_data):
     """
-    保存关注列表到文件
+    保存关注列表到文件和 session_state
 
     Args:
         watchlist_data: 包含 watchlist 列表的字典
@@ -339,6 +344,8 @@ def save_watchlist(watchlist_data):
         os.makedirs("datas", exist_ok=True)
         with open(WATCHLIST_FILE, "w", encoding="utf-8") as f:
             json.dump(watchlist_data, f, ensure_ascii=False, indent=2)
+        # 同时更新 session_state
+        st.session_state.watchlist_data = watchlist_data
         return True
     except Exception as e:
         st.error(f"保存关注列表失败: {e}")
@@ -356,7 +363,8 @@ def add_stock_to_watchlist(code, name):
     Returns:
         tuple: (bool, str) - 是否成功，消息
     """
-    watchlist_data = load_watchlist()
+    _init_watchlist_state()
+    watchlist_data = get_watchlist()
 
     if "watchlist" not in watchlist_data:
         watchlist_data["watchlist"] = []
@@ -392,7 +400,7 @@ def is_watched(code, watchlist_data=None):
         bool: 是否已关注
     """
     if watchlist_data is None:
-        watchlist_data = load_watchlist()
+        watchlist_data = get_watchlist()
 
     if "watchlist" not in watchlist_data:
         return False
@@ -414,7 +422,7 @@ def stock_card_with_watch(stock, stock_type="capacity"):
     name = stock.get("name", "")
 
     # 判断是否已关注
-    watchlist_data = load_watchlist()
+    watchlist_data = get_watchlist()
     watched = is_watched(code, watchlist_data)
 
     with st.container():
@@ -474,6 +482,9 @@ def stock_card_with_watch(stock, stock_type="capacity"):
 def main():
     st.set_page_config(page_title="特征分组", page_icon="📊", layout="wide")
 
+    # 初始化关注列表
+    _init_watchlist_state()
+
     _section_title("📊 特征分组")
 
     # AI分析开关
@@ -531,7 +542,7 @@ def main():
                     show_ui=True,
                 )
 
-            # 一行4列展示 K 线图
+            # 一行4列展示股票卡片（带关注功能）
             stocks_per_row = 4
             for i in range(0, len(capacity_stocks), stocks_per_row):
                 cols = st.columns(stocks_per_row)
@@ -539,33 +550,8 @@ def main():
                     idx = i + j
                     if idx < len(capacity_stocks):
                         stock = capacity_stocks[idx]
-                        code = stock.get("code", "")
-                        name = stock.get("name", "")
-                        pct = stock.get("pct_chg", 0)
-                        amt = stock.get("amount_yi", 0)
-                        mv = stock.get("total_mv_yi", 0)
-
                         with col:
-                            st.markdown(
-                                f"**{name}** ({code}) 涨:{pct:.1f}% 额:{amt}亿 市:{mv}亿"
-                            )
-
-                            # 获取 K 线数据（添加延时避免请求过快）
-                            try:
-                                time.sleep(0.3)  # 300ms 延时
-                                price_df = get_ak_price_df(code, count=60)
-                                if price_df is not None and not price_df.empty:
-                                    plotK(
-                                        price_df,
-                                        k="d",
-                                        plot_type="candle",
-                                        ma_line=(5, 10, 20),
-                                        container=st,
-                                    )
-                                else:
-                                    st.warning(f"{name} 无 K 线数据")
-                            except Exception as e:
-                                st.warning(f"{name} 获取 K 线失败")
+                            stock_card_with_watch(stock, stock_type="capacity")
 
     # ---- 分组2: 10:30前涨停 ----
     st.markdown("---")
@@ -627,7 +613,7 @@ def main():
                     show_ui=True,
                 )
 
-            # 一行4列展示 K 线图
+            # 一行4列展示股票卡片（带关注功能）
             stocks_per_row = 4
             for i in range(0, len(early_zt), stocks_per_row):
                 cols = st.columns(stocks_per_row)
@@ -635,32 +621,8 @@ def main():
                     idx = i + j
                     if idx < len(early_zt):
                         stock = early_zt[idx]
-                        code = stock.get("code", "")
-                        name = stock.get("name", "")
-                        zdt_time = parse_zdt_time(stock.get("zdttm"))
-                        total_mv = stock.get("total_mv", 0)
-
                         with col:
-                            st.markdown(
-                                f"**{name}** ({code}) 封板:{zdt_time} 市:{total_mv:.0f}亿"
-                            )
-
-                            # 获取 K 线数据（添加延时避免请求过快）
-                            try:
-                                time.sleep(0.3)  # 300ms 延时
-                                price_df = get_ak_price_df(code, count=60)
-                                if price_df is not None and not price_df.empty:
-                                    plotK(
-                                        price_df,
-                                        k="d",
-                                        plot_type="candle",
-                                        ma_line=(5, 10, 20),
-                                        container=st,
-                                    )
-                                else:
-                                    st.warning(f"{name} 无 K 线数据")
-                            except Exception as e:
-                                st.warning(f"{name} 获取 K 线失败")
+                            stock_card_with_watch(stock, stock_type="zt")
 
 
 if __name__ == "__main__":

@@ -21,28 +21,33 @@ from tools.kline_data import get_ak_price_df
 WATCHLIST_FILE = "datas/watchlist.json"
 
 
-@st.cache_data(ttl="5m")
-def load_watchlist():
+def _init_watchlist_state():
+    """初始化关注列表到 session_state"""
+    if "watchlist_data" not in st.session_state:
+        if not os.path.exists(WATCHLIST_FILE):
+            st.session_state.watchlist_data = {"watchlist": []}
+        else:
+            try:
+                with open(WATCHLIST_FILE, "r", encoding="utf-8") as f:
+                    st.session_state.watchlist_data = json.load(f)
+            except Exception as e:
+                st.session_state.watchlist_data = {"watchlist": []}
+
+
+def get_watchlist():
     """
-    加载关注列表
+    获取关注列表（从 session_state）
 
     Returns:
         dict: 包含 watchlist 列表的字典
     """
-    if not os.path.exists(WATCHLIST_FILE):
-        return {"watchlist": []}
-
-    try:
-        with open(WATCHLIST_FILE, "r", encoding="utf-8") as f:
-            return json.load(f)
-    except Exception as e:
-        st.warning(f"加载关注列表失败: {e}")
-        return {"watchlist": []}
+    _init_watchlist_state()
+    return st.session_state.watchlist_data
 
 
 def save_watchlist(watchlist_data):
     """
-    保存关注列表到文件
+    保存关注列表到文件和 session_state
 
     Args:
         watchlist_data: 包含 watchlist 列表的字典
@@ -54,6 +59,8 @@ def save_watchlist(watchlist_data):
         os.makedirs("datas", exist_ok=True)
         with open(WATCHLIST_FILE, "w", encoding="utf-8") as f:
             json.dump(watchlist_data, f, ensure_ascii=False, indent=2)
+        # 同时更新 session_state
+        st.session_state.watchlist_data = watchlist_data
         return True
     except Exception as e:
         st.error(f"保存关注列表失败: {e}")
@@ -70,7 +77,8 @@ def remove_stock_from_watchlist(code):
     Returns:
         tuple: (bool, str) - 是否成功，消息
     """
-    watchlist_data = load_watchlist()
+    _init_watchlist_state()
+    watchlist_data = get_watchlist()
 
     if "watchlist" not in watchlist_data or not watchlist_data["watchlist"]:
         return False, "列表为空"
@@ -104,10 +112,13 @@ def main():
     """主函数"""
     st.set_page_config(page_title="关注分组", page_icon="⭐", layout="wide")
 
+    # 初始化关注列表
+    _init_watchlist_state()
+
     _section_title("⭐ 关注分组")
 
     # 加载关注列表
-    watchlist_data = load_watchlist()
+    watchlist_data = get_watchlist()
     watchlist = watchlist_data.get("watchlist", [])
 
     # 显示关注列表

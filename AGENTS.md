@@ -201,9 +201,6 @@ LLM 调用接口：
 - `cls_telegraphs()`: 财联社电报爬虫
 - `get_cninfo_orgid(stock_code)`: 获取巨潮资讯 orgId
 - `cninfo_announcement_spider(...)`: 巨潮资讯公告爬虫
-- `wxmp_post_list(fakeid, ...)`: 微信文章列表爬虫
-- `InfoSpider` 类：公告爬虫类
-- `ISWSpider` 类：财联社 ISW 爬虫类
 
 ---
 
