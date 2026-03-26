@@ -12,7 +12,7 @@ from tools import (
     get_financing_net_buy_series,
     get_gem_pe_series,
 )
-from tools.stock_data import get_ak_price_df
+from tools.kline_data import get_ak_price_df
 from tools.financial_data import EconomicIndicators
 from tools.ai_analysis import (
     analyze_external_assets,

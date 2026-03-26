@@ -5,7 +5,7 @@ import pandas as pd
 import akshare as ak
 import streamlit as st
 import tushare as ts
-from tools.stock_data import get_ak_price_df
+from tools.kline_data import get_ak_price_df
 
 
 def _normalize_top_stocks_df(df):
@@ -76,8 +76,20 @@ def _build_pct_distribution(df):
     if pct_series.empty:
         return []
     bins = [-100, -10, -5, -3, 0, 3, 5, 10, 20, 100]
-    labels = ["<-10%", "-10%~-5%", "-5%~-3%", "-3%~0%", "0%~3%", "3%~5%", "5%~10%", "10%~20%", ">20%"]
-    categories = pd.cut(pct_series, bins=bins, labels=labels, right=False, include_lowest=True)
+    labels = [
+        "<-10%",
+        "-10%~-5%",
+        "-5%~-3%",
+        "-3%~0%",
+        "0%~3%",
+        "3%~5%",
+        "5%~10%",
+        "10%~20%",
+        ">20%",
+    ]
+    categories = pd.cut(
+        pct_series, bins=bins, labels=labels, right=False, include_lowest=True
+    )
     counts = categories.value_counts().reindex(labels, fill_value=0)
     distribution = []
     for idx, (label, count) in enumerate(zip(labels, counts)):
@@ -156,7 +168,9 @@ def _normalize_spot_df(df):
     name_col = _pick_first_column(df, ["名称", "鑲＄エ名称", "name"])
     pct_col = _pick_first_column(df, ["润跌平", "润跌平(%)", "娑ㄥ箙", "pct_chg"])
     amount_col = _pick_first_column(df, ["成交额", "成交额万", "成交额万元", "amount"])
-    mkt_cap_col = _pick_first_column(df, ["鎬诲競鍊?", "鎬诲競鍊?鍏?", "鎬诲競鍊?涓囧厓)", "total_mv"])
+    mkt_cap_col = _pick_first_column(
+        df, ["鎬诲競鍊?", "鎬诲競鍊?鍏?", "鎬诲競鍊?涓囧厓)", "total_mv"]
+    )
 
     if not all([code_col, name_col, pct_col, amount_col, mkt_cap_col]):
         return pd.DataFrame()
@@ -227,7 +241,9 @@ def _records_to_df(records, date_col="date"):
 @st.cache_data(ttl="1d")
 def get_concept_kline_data(concept_name, start_date, end_date):
     try:
-        df = ak.stock_board_concept_index_ths(symbol=concept_name, start_date=start_date, end_date=end_date)
+        df = ak.stock_board_concept_index_ths(
+            symbol=concept_name, start_date=start_date, end_date=end_date
+        )
         if df is None or df.empty:
             return None
         return _normalize_concept_kline(df)
@@ -264,7 +280,9 @@ def get_benchmark_kline(start_date, end_date, symbol="sh000001"):
     fetchers = [
         lambda: ak.stock_zh_index_daily(symbol=symbol),
         lambda: ak.stock_zh_index_daily_tx(symbol=symbol),
-        lambda: ak.stock_zh_index_daily_em(symbol=_as_em_symbol(symbol), start_date=start_date, end_date=end_date),
+        lambda: ak.stock_zh_index_daily_em(
+            symbol=_as_em_symbol(symbol), start_date=start_date, end_date=end_date
+        ),
     ]
 
     df = None
@@ -303,8 +321,12 @@ def get_zt_pool(date):
         if df is not None and not df.empty:
             return df
         # 二级 fallback：用日线 + 涨跌停价推导
-        daily = pro.daily(trade_date=date, fields="ts_code,trade_date,close,pct_chg,amount")
-        limit = pro.stk_limit(trade_date=date, fields="ts_code,trade_date,up_limit,down_limit")
+        daily = pro.daily(
+            trade_date=date, fields="ts_code,trade_date,close,pct_chg,amount"
+        )
+        limit = pro.stk_limit(
+            trade_date=date, fields="ts_code,trade_date,up_limit,down_limit"
+        )
         if daily is None or daily.empty or limit is None or limit.empty:
             return pd.DataFrame()
         merged = daily.merge(limit, on=["ts_code", "trade_date"], how="left")
@@ -333,8 +355,12 @@ def get_dt_pool(date):
         if df is not None and not df.empty:
             return df
         # 二级 fallback：用日线 + 涨跌停价推导
-        daily = pro.daily(trade_date=date, fields="ts_code,trade_date,close,pct_chg,amount")
-        limit = pro.stk_limit(trade_date=date, fields="ts_code,trade_date,up_limit,down_limit")
+        daily = pro.daily(
+            trade_date=date, fields="ts_code,trade_date,close,pct_chg,amount"
+        )
+        limit = pro.stk_limit(
+            trade_date=date, fields="ts_code,trade_date,up_limit,down_limit"
+        )
         if daily is None or daily.empty or limit is None or limit.empty:
             return pd.DataFrame()
         merged = daily.merge(limit, on=["ts_code", "trade_date"], how="left")
@@ -346,21 +372,35 @@ def get_dt_pool(date):
 
 def _fetch_kline_df(code, end_date, lookback_days, adjust_mode, include_amount):
     end_str = end_date.strftime("%Y%m%d")
-    start_date = (end_date - datetime.timedelta(days=lookback_days * 2)).strftime("%Y%m%d")
+    start_date = (end_date - datetime.timedelta(days=lookback_days * 2)).strftime(
+        "%Y%m%d"
+    )
 
     if adjust_mode == "qfq":
         price_df = get_ak_price_df(code, end_date=end_str, count=lookback_days)
         price_df = price_df.copy()
         price_df.index = pd.to_datetime(price_df.index)
     else:
-        raw = ak.stock_zh_a_hist(symbol=code, period="daily", start_date=start_date, end_date=end_str, adjust=adjust_mode)
+        raw = ak.stock_zh_a_hist(
+            symbol=code,
+            period="daily",
+            start_date=start_date,
+            end_date=end_str,
+            adjust=adjust_mode,
+        )
         price_df = _normalize_em_kline(raw)
 
     if price_df is None or price_df.empty:
         return pd.DataFrame()
 
     if include_amount and "amount" not in price_df.columns:
-        raw = ak.stock_zh_a_hist(symbol=code, period="daily", start_date=start_date, end_date=end_str, adjust=adjust_mode)
+        raw = ak.stock_zh_a_hist(
+            symbol=code,
+            period="daily",
+            start_date=start_date,
+            end_date=end_str,
+            adjust=adjust_mode,
+        )
         amount_df = _normalize_em_kline(raw)
         if not amount_df.empty and "amount" in amount_df.columns:
             price_df = price_df.join(amount_df[["amount"]], how="left")

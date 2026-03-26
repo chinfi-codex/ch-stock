@@ -15,7 +15,7 @@ import pandas as pd
 import requests
 
 from tools import plotK
-from tools.stock_data import get_ak_price_df
+from tools.kline_data import get_ak_price_df
 from tools.ai_analysis import analyze_stock_classification
 
 
@@ -314,86 +314,139 @@ def main():
     )
 
     # ---- 分组1: 容量上涨股票 ----
-    st.markdown(
-        "### 💪 容量上涨（成交>5亿，涨幅>8%，市值50-200亿，5日涨幅<25%，去除北交所）"
-    )
-
-    with st.spinner("正在筛选容量股票..."):
-        capacity_stocks = get_capacity_stocks()
-
-    if not capacity_stocks:
-        st.info("暂无符合条件的容量上涨股票")
-    else:
-        st.caption(f"共 {len(capacity_stocks)} 只")
-
-        # AI 分析 - 容量上涨股票分类
-        if enable_ai:
-            analyze_stock_classification(
-                stock_list=capacity_stocks,
-                group_name="容量上涨股票",
-                show_ui=True,
-            )
-
-        # 一行4列展示 K 线图
-        stocks_per_row = 4
-        for i in range(0, len(capacity_stocks), stocks_per_row):
-            cols = st.columns(stocks_per_row)
-            for j, col in enumerate(cols):
-                idx = i + j
-                if idx < len(capacity_stocks):
-                    stock = capacity_stocks[idx]
-                    code = stock.get("code", "")
-                    name = stock.get("name", "")
-                    pct = stock.get("pct_chg", 0)
-                    amt = stock.get("amount_yi", 0)
-                    mv = stock.get("total_mv_yi", 0)
-
-                    with col:
-                        st.markdown(
-                            f"**{name}** ({code}) 涨:{pct:.1f}% 额:{amt}亿 市:{mv}亿"
-                        )
-
-                        # 获取 K 线数据（添加延时避免请求过快）
-                        try:
-                            time.sleep(0.3)  # 300ms 延时
-                            price_df = get_ak_price_df(code, count=60)
-                            if price_df is not None and not price_df.empty:
-                                plotK(
-                                    price_df,
-                                    k="d",
-                                    plot_type="candle",
-                                    ma_line=(5, 10, 20),
-                                    container=st,
-                                )
-                            else:
-                                st.warning(f"{name} 无 K 线数据")
-                        except Exception as e:
-                            st.warning(f"{name} 获取 K 线失败")
-
     st.markdown("---")
+    col1, col2 = st.columns([0.7, 0.3])
+    with col1:
+        st.markdown(
+            "### 💪 容量上涨（成交>5亿，涨幅>8%，市值50-200亿，5日涨幅<25%，去除北交所）"
+        )
+    with col2:
+        if st.button("📊 查看详情", key="btn_capacity", use_container_width=True):
+            st.session_state.show_capacity = True
+
+    # 使用session_state控制数据加载和显示
+    if "show_capacity" not in st.session_state:
+        st.session_state.show_capacity = False
+    if "capacity_stocks" not in st.session_state:
+        st.session_state.capacity_stocks = None
+    if "capacity_loading" not in st.session_state:
+        st.session_state.capacity_loading = False
+
+    # 点击按钮后加载数据
+    if (
+        st.session_state.show_capacity
+        and st.session_state.capacity_stocks is None
+        and not st.session_state.capacity_loading
+    ):
+        st.session_state.capacity_loading = True
+        with st.spinner("正在筛选容量股票..."):
+            st.session_state.capacity_stocks = get_capacity_stocks()
+        st.session_state.capacity_loading = False
+        st.rerun()
+
+    # 显示内容
+    if st.session_state.show_capacity:
+        capacity_stocks = st.session_state.capacity_stocks
+
+        if capacity_stocks is None:
+            st.info("点击上方按钮加载数据")
+        elif not capacity_stocks:
+            st.info("暂无符合条件的容量上涨股票")
+        else:
+            st.caption(f"共 {len(capacity_stocks)} 只")
+
+            # AI 分析 - 容量上涨股票分类
+            if enable_ai:
+                analyze_stock_classification(
+                    stock_list=capacity_stocks,
+                    group_name="容量上涨股票",
+                    show_ui=True,
+                )
+
+            # 一行4列展示 K 线图
+            stocks_per_row = 4
+            for i in range(0, len(capacity_stocks), stocks_per_row):
+                cols = st.columns(stocks_per_row)
+                for j, col in enumerate(cols):
+                    idx = i + j
+                    if idx < len(capacity_stocks):
+                        stock = capacity_stocks[idx]
+                        code = stock.get("code", "")
+                        name = stock.get("name", "")
+                        pct = stock.get("pct_chg", 0)
+                        amt = stock.get("amount_yi", 0)
+                        mv = stock.get("total_mv_yi", 0)
+
+                        with col:
+                            st.markdown(
+                                f"**{name}** ({code}) 涨:{pct:.1f}% 额:{amt}亿 市:{mv}亿"
+                            )
+
+                            # 获取 K 线数据（添加延时避免请求过快）
+                            try:
+                                time.sleep(0.3)  # 300ms 延时
+                                price_df = get_ak_price_df(code, count=60)
+                                if price_df is not None and not price_df.empty:
+                                    plotK(
+                                        price_df,
+                                        k="d",
+                                        plot_type="candle",
+                                        ma_line=(5, 10, 20),
+                                        container=st,
+                                    )
+                                else:
+                                    st.warning(f"{name} 无 K 线数据")
+                            except Exception as e:
+                                st.warning(f"{name} 获取 K 线失败")
 
     # ---- 分组2: 10:30前涨停 ----
-    st.markdown("### 📈 10:30前涨停（JRJ，总市值≥50亿，已过滤ST）")
+    st.markdown("---")
+    col1, col2 = st.columns([0.7, 0.3])
+    with col1:
+        st.markdown("### 📈 10:30前涨停（JRJ，总市值≥50亿，已过滤ST）")
+    with col2:
+        if st.button("📈 查看详情", key="btn_zt", use_container_width=True):
+            st.session_state.show_zt = True
 
-    # 获取涨停列表
-    with st.spinner("正在获取涨停数据..."):
-        zt_records = fetch_zt_list_from_jrj("")
+    # 使用session_state控制数据加载和显示
+    if "show_zt" not in st.session_state:
+        st.session_state.show_zt = False
+    if "zt_stocks" not in st.session_state:
+        st.session_state.zt_stocks = None
+    if "zt_loading" not in st.session_state:
+        st.session_state.zt_loading = False
 
-    if not zt_records:
-        st.info("暂无涨停数据")
-    else:
-        # 获取总市值数据
-        with st.spinner("正在获取市值数据..."):
-            zt_records = enrich_zt_with_mv(zt_records)
+    # 点击按钮后加载数据
+    if (
+        st.session_state.show_zt
+        and st.session_state.zt_stocks is None
+        and not st.session_state.zt_loading
+    ):
+        st.session_state.zt_loading = True
+        with st.spinner("正在获取涨停数据..."):
+            zt_records = fetch_zt_list_from_jrj("")
+            if zt_records:
+                with st.spinner("正在获取市值数据..."):
+                    zt_records = enrich_zt_with_mv(zt_records)
+                # 筛选 10:30 前涨停且总市值 >= 50亿的股票
+                early_zt = [
+                    r
+                    for r in zt_records
+                    if r.get("zdttm", 0) <= 103000 and r.get("total_mv", 0) >= 50
+                ]
+                st.session_state.zt_stocks = early_zt
+            else:
+                st.session_state.zt_stocks = []
+        st.session_state.zt_loading = False
+        st.rerun()
 
-        # 筛选 10:30 前涨停且总市值 >= 50亿的股票
-        early_zt = [
-            r
-            for r in zt_records
-            if r.get("zdttm", 0) <= 103000 and r.get("total_mv", 0) >= 50
-        ]
+    # 显示内容
+    if st.session_state.show_zt:
+        early_zt = st.session_state.zt_stocks
 
-        if not early_zt:
+        if early_zt is None:
+            st.info("点击上方按钮加载数据")
+        elif not early_zt:
             st.info("暂无符合条件的涨停股票")
         else:
             st.caption(f"共 {len(early_zt)} 只")

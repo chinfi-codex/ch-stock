@@ -3,14 +3,27 @@
 包含股票数据、爬虫、大模型、金融数据、公告数据、电报数据等功能模块
 """
 
-# 股票数据相关
-from .stock_data import (
-    StockTechnical,
+# K线数据相关（从 stock_data 拆分）
+from .kline_data import (
     get_ak_price_df,
     get_ak_interval_price_df,
+    get_tushare_price_df,
     get_tushare_weekly_df,
     get_tushare_monthly_df,
     plotK,
+    calculate_macd,
+)
+
+# 技术分析相关（从 stock_data 拆分，新增K线形态识别）
+from .technical_analysis import StockTechnical
+
+# K线形态识别
+from .kline_patterns import (
+    KLinePatternRecognizer,
+    PatternResult,
+    PatternType,
+    recognize_pattern,
+    recognize_all_patterns,
 )
 
 # 市场数据相关
@@ -57,13 +70,22 @@ from .utils import (
 )
 
 __all__ = [
-    # 股票数据
-    "StockTechnical",
+    # K线数据
     "get_ak_price_df",
     "get_ak_interval_price_df",
+    "get_tushare_price_df",
     "get_tushare_weekly_df",
     "get_tushare_monthly_df",
     "plotK",
+    "calculate_macd",
+    # 技术分析
+    "StockTechnical",
+    # K线形态识别
+    "KLinePatternRecognizer",
+    "PatternResult",
+    "PatternType",
+    "recognize_pattern",
+    "recognize_all_patterns",
     # 市场数据
     "get_market_data",
     "get_all_stocks",
