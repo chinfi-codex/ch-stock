@@ -1,33 +1,349 @@
-# ch-stock 项目代码规范
+# ch-stock 项目架构规范与代码指南
+
+## 架构哲学
+
+### 分层架构设计
+
+本项目采用**三层架构**设计，实现职责分离和代码复用：
+
+```
+┌─────────────────────────────────────────────┐
+│           Presentation Layer                │
+│   pages/          Streamlit 页面展示         │
+│   app.py          主应用入口                │
+└──────────────────┬──────────────────────────┘
+                   │ 调用
+┌──────────────────▼──────────────────────────┐
+│          Business Logic Layer               │
+│   services/       业务流程编排（AI分析等）   │
+└──────────────────┬──────────────────────────┘
+                   │ 组合调用
+┌──────────────────▼──────────────────────────┐
+│        Atomic Capability Layer              │
+│   tools/          业务原子能力               │
+│   ├── kline_data.py      K线数据获取        │
+│   ├── technical_analysis.py 技术分析        │
+│   ├── market_data.py     市场数据           │
+│   └── ...                                  │
+└──────────────────┬──────────────────────────┘
+                   │ 依赖
+┌──────────────────▼──────────────────────────┐
+│       Infrastructure Layer                  │
+│   infra/          基础设施（通用、可复用）   │
+│   ├── config.py          配置管理           │
+│   ├── llm_client.py      LLM客户端         │
+│   ├── data_utils.py      数据处理          │
+│   └── ...                                  │
+└─────────────────────────────────────────────┘
+```
+
+### 核心设计原则
+
+#### 1. 职责分离（Separation of Concerns）
+
+- **infra/**: 通用基础设施，**与业务无关**，可被任何项目复用
+- **tools/**: 业务原子能力，**单一职责**，可独立使用
+- **services/**: 业务流程编排，**组合原子能力**完成复杂业务场景
+- **pages/**: UI展示层，**仅负责渲染**，不包含业务逻辑
+
+#### 2. 原子化能力（Atomic Capabilities）
+
+业务功能拆解为最小可复用单元：
+- ✅ `get_tushare_price_df()` - 获取K线数据（原子能力）
+- ✅ `calculate_macd()` - 计算MACD指标（原子能力）
+- ✅ `build_macro_prompt()` - 构建分析Prompt（原子能力）
+- ❌ `analyze_external_assets()` - 这是业务流程（在services层）
+
+#### 3. 依赖方向（Dependency Direction）
+
+依赖只能**自上而下**：
+```
+services → tools → infra
+pages → services/tools
+```
+
+**禁止反向依赖**：
+- ❌ infra 不能依赖 tools
+- ❌ tools 不能依赖 services
+- ❌ services 不能依赖 pages
+
+#### 4. 显式优于隐式（Explicit over Implicit）
+
+- 跨层调用必须**显式导入**，禁止使用通配符导入
+- 函数职责**单一且明确**，避免"万能函数"
+- 错误处理**显式抛出**，不静默吞掉异常
+
+---
 
 ## 项目结构
 
 ```
 ch-stock/
 ├── app.py                      # Streamlit 主应用入口
-├── requirements.txt              # Python 依赖
-├── data_sources.py             # 数据源接口（统一适配层）
+├── requirements.txt            # Python 依赖
+├── data_sources.py             # 数据源适配层（兼容旧代码）
 │
-├── tools/                       # 核工具模块
-│   ├── __init__.py            # 统一导出接口
-│   ├── utils.py                # 核心工具函数（类型转换、日期处理等）
-│   ├── kline_data.py          # K线数据获取（日线/周线/月线/分时）+ K线绘图
-│   ├── technical_analysis.py    # 技术指标计算（StockTechnical类）+ K线形态识别集成
-│   ├── kline_patterns.py      # K线形态识别（12种形态：锤子线、十字星、吞没、早晨之星等）
-│   ├── market_data.py         # 市场数据（大盘、龙虎榜、板块、融资数据）
-│   ├── financial_data.py        # 金融数据（货币、宏观指标、汇率、经济指标）
-│   ├── storage_utils.py       # 存储工具（JSON/CSV 读写）
-│   ├── ai_analysis.py         # AI 分析业务逻辑
-│   ├── llm_tools.py          # LLM 调用接口（OpenAI 兼容 API + Kimi CLI）
-│   └── crawlers.py            # 爬虫工具（公告、微信、财联社）
+├── infra/                      # 基础设施层（通用、可复用）
+│   ├── __init__.py            # 导出 infra 模块
+│   ├── config.py              # 配置管理（Token获取等）
+│   ├── llm_client.py          # LLM调用封装
+│   ├── data_utils.py          # 数据处理（代码转换等）
+│   ├── storage.py             # 文件存储工具
+│   └── web_scraper.py         # 网页爬取
 │
-├── pages/                       # Streamlit 多页面
+├── tools/                      # 业务原子能力层
+│   ├── __init__.py            # 导出 tools 模块
+│   ├── utils.py               # 股票业务工具函数
+│   ├── kline_data.py          # K线数据获取 + 绘图
+│   ├── technical_analysis.py  # 技术指标计算
+│   ├── kline_patterns.py      # K线形态识别
+│   ├── market_data.py         # 市场数据获取
+│   ├── financial_data.py      # 金融数据获取
+│   ├── crawlers.py            # 数据爬虫
+│   └── ai_analysis.py         # AI分析原子能力
+│
+├── services/                   # 业务流程层
+│   ├── __init__.py            # 导出 services 模块
+│   └── ai_analysis.py         # AI分析业务流程编排
+│
+├── pages/                      # UI展示层（Streamlit多页面）
+│   ├── 08-关注分组.py
 │   ├── 09-特征分组.py
 │   └── 10-公司投研专家.py
 │
-├── datas/                       # 数据存储目录
-│   └── reviews/
+└── datas/                      # 数据存储目录
+    └── reviews/
 ```
+
+---
+
+## 分层模块设计说明
+
+### 第一层：Infrastructure（基础设施层）
+
+**定位**：通用、与业务无关的基础设施，可被任何项目复用。
+
+**设计原则**：
+- 单一职责，功能原子化
+- 不依赖项目业务逻辑
+- 提供稳定的抽象接口
+
+#### `infra/config.py` - 配置管理
+```python
+# 职责：Token获取、配置读取
+# 使用方式：
+from infra.config import get_tushare_token
+
+token = get_tushare_token()  # 自动处理优先级：环境变量 > secrets > .env
+```
+
+**关键函数**：
+- `get_tushare_token()` - 获取Tushare Token（支持多源优先级）
+
+#### `infra/llm_client.py` - LLM客户端
+```python
+# 职责：统一封装LLM调用，支持多种提供商
+# 使用方式：
+from infra.llm_client import call_kimi_print, clean_ai_output
+
+result = call_kimi_print(prompt, cache_key="analysis_001")
+cleaned = clean_ai_output(result)
+```
+
+**关键函数**：
+- `call_kimi_print()` - 调用Kimi CLI（带缓存）
+- `clean_ai_output()` - 清理AI输出格式
+- `ai_summarize_cached()` - 带缓存的AI总结（业务封装）
+
+#### `infra/data_utils.py` - 数据处理
+```python
+# 职责：通用数据处理，股票代码转换等
+# 使用方式：
+from infra.data_utils import convert_to_ts_code, to_number
+
+ts_code = convert_to_ts_code("000001")  # "000001.SZ"
+nums = to_number(df["pct_chg"])         # 转换为数值类型
+```
+
+**关键函数**：
+- `convert_to_ts_code()` - 转换为Tushare代码格式
+- `convert_to_ak_code()` - 转换为AKShare代码格式
+- `to_number()` - 转换Series为数值类型
+
+#### `infra/storage.py` - 文件存储
+```python
+# 职责：文件存储相关工具
+# 使用方式：
+from infra.storage import clean_filename
+
+safe_name = clean_filename("非法:文件名.txt")  # "非法_文件名.txt"
+```
+
+**关键函数**：
+- `clean_filename()` - 清理文件名中的非法字符
+
+#### `infra/web_scraper.py` - 网页爬取
+```python
+# 职责：通用网页内容爬取
+# 使用方式：
+from infra.web_scraper import scrape_with_jina_reader
+
+result = scrape_with_jina_reader(url, title="文章标题")
+```
+
+**关键函数**：
+- `scrape_with_jina_reader()` - 使用Jina Reader爬取网页
+
+---
+
+### 第二层：Tools（业务原子能力层）
+
+**定位**：股票分析领域的原子能力，单一职责，可独立使用。
+
+**设计原则**：
+- 每个函数只做一件事
+- 不依赖其他业务模块（可依赖infra）
+- 提供清晰的输入输出接口
+
+#### `tools/utils.py` - 股票业务工具
+```python
+# 职责：股票业务相关的数据处理工具
+# 依赖：infra.data_utils（代码转换）
+
+from tools.utils import (
+    get_stock_list,           # 获取股票列表
+    get_xueqiu_stock_topics,  # 获取雪球话题
+    weibo_comments,           # 获取微博评论
+    filter_st_bj_stocks,      # 过滤ST和北交所
+    calc_pct_change,          # 计算百分比变化
+)
+```
+
+#### `tools/kline_data.py` - K线数据
+```python
+# 职责：K线数据获取和可视化
+# 依赖：infra.config, infra.data_utils
+
+from tools.kline_data import (
+    get_tushare_price_df,     # 获取日K线
+    get_tushare_weekly_df,    # 获取周K线
+    get_tushare_monthly_df,   # 获取月K线
+    plotK,                    # 绘制K线图
+    calculate_macd,           # 计算MACD指标
+)
+```
+
+#### `tools/technical_analysis.py` - 技术分析
+```python
+# 职责：技术指标计算和形态识别
+# 依赖：tools.kline_patterns
+
+from tools.technical_analysis import StockTechnical
+
+tech = StockTechnical(df)
+features = tech.get_features()           # 获取所有技术特征
+patterns = tech.recognize_pattern()      # 识别K线形态（独立方法）
+```
+
+#### `tools/kline_patterns.py` - K线形态
+```python
+# 职责：12种K线形态识别算法
+# 依赖：无（纯算法模块）
+
+from tools.kline_patterns import (
+    KLinePatternRecognizer,
+    recognize_pattern,        # 便捷函数：识别单一形态
+    recognize_all_patterns,   # 便捷函数：识别所有形态
+)
+```
+
+#### `tools/market_data.py` - 市场数据
+```python
+# 职责：大盘、板块、龙虎榜等市场数据获取
+# 依赖：infra.config, infra.data_utils
+
+from tools.market_data import (
+    get_market_data,          # 获取大盘数据
+    get_all_stocks,           # 获取所有股票
+    get_longhu_data,          # 获取龙虎榜数据
+)
+```
+
+#### `tools/financial_data.py` - 金融数据
+```python
+# 职责：汇率、债券、商品等金融数据
+# 依赖：infra.config
+
+from tools.financial_data import EconomicIndicators
+
+# 获取汇率
+rate = EconomicIndicators.get_exchangerates_daily("USD", "CNY")
+```
+
+#### `tools/crawlers.py` - 数据爬虫
+```python
+# 职责：财联社、巨潮资讯等数据源爬取
+# 依赖：infra.web_scraper, infra.storage
+
+from tools.crawlers import (
+    cls_telegraphs,           # 财联社电报
+    cninfo_announcement_spider, # 巨潮资讯公告
+)
+```
+
+#### `tools/ai_analysis.py` - AI分析原子能力
+```python
+# 职责：AI分析的Prompt构建和数据格式化（原子能力）
+# 依赖：infra.llm_client
+
+from tools.ai_analysis import (
+    build_macro_prompt,       # 构建宏观分析Prompt
+    build_market_overview_prompt,  # 构建市场概况Prompt
+    run_ai_analysis,          # 执行AI分析（原子能力）
+    display_ai_analysis,      # 显示AI分析结果
+    format_series_for_ai,     # 格式化数据序列
+)
+
+# 注意：analyze_* 业务流程已迁移到 services.ai_analysis
+```
+
+---
+
+### 第三层：Services（业务流程层）
+
+**定位**：业务流程编排，组合多个原子能力完成复杂业务场景。
+
+**设计原则**：
+- 协调多个tools完成业务目标
+- 处理业务规则和流程控制
+- 可调用display方法展示结果
+
+#### `services/ai_analysis.py` - AI分析业务流程
+```python
+# 职责：AI分析的业务流程编排
+# 依赖：tools.ai_analysis（原子能力）
+
+from services.ai_analysis import (
+    analyze_external_assets,      # 外围资产分析流程
+    analyze_market_overview,      # 市场概况分析流程
+    analyze_index_technical,      # 指数技术分析流程
+    analyze_stock_classification, # 股票分类分析流程
+)
+
+# 使用示例：
+result = analyze_external_assets(
+    usdcny_series=usdcny_data,
+    btc_series=btc_data,
+    xau_series=xau_data,
+    wti_series=wti_data,
+    us10y_series=us10y_data,
+    show_ui=True  # 自动在Streamlit中展示结果
+)
+```
+
+**与 tools.ai_analysis 的区别**：
+- `tools.ai_analysis.build_macro_prompt()` - 原子能力：构建Prompt
+- `services.ai_analysis.analyze_external_assets()` - 业务流程：构建Prompt + 调用AI + 展示结果
 
 ---
 
@@ -41,7 +357,8 @@ ch-stock/
   # -*- coding: utf-8 -*-
   ```
 
-### 导入顺序
+### 导入顺序（强制要求）
+
 ```python
 # 1. 标准库
 import os
@@ -55,190 +372,147 @@ import streamlit as st
 import akshare as ak
 import tushare as ts
 
-# 3. 本地模块
-from .utils import get_tushare_token, convert_to_ts_code
-from .kline_data import get_ak_price_df, plotK
+# 3. 基础设施层（跨项目可复用）
+from infra.config import get_tushare_token
+from infra.data_utils import convert_to_ts_code
+from infra.llm_client import call_kimi_print
+
+# 4. 业务原子能力层（股票领域）
+from tools.kline_data import get_ak_price_df, plotK
+from tools.market_data import get_market_data
+from tools.ai_analysis import build_macro_prompt
+
+# 5. 业务流程层（复杂场景编排）
+from services.ai_analysis import analyze_external_assets
 ```
 
-### 函数命名
-- 使用 `snake_case`：`get_market_data`, `analyze_stock`, `calculate_macd`
-- 私有方法以下划线开头：`_get_token`, `_format_data`
-- 常量名使用 `UPPER_SNAKE`
+### 跨层调用规范
 
-### 类型注解
+#### ✅ 正确的调用方式
+
 ```python
-def get_stock_data(ts_code: str, start_date: str, end_date: str) -> pd.DataFrame:
+# services 层调用 tools 层（业务流程组合原子能力）
+# services/ai_analysis.py
+from tools.ai_analysis import build_macro_prompt, run_ai_analysis
+from tools.financial_data import EconomicIndicators
+
+def analyze_external_assets(...):
+    # 1. 获取数据（原子能力）
+    usdcny_data = EconomicIndicators.get_exchangerates_daily(...)
+    
+    # 2. 构建Prompt（原子能力）
+    prompt = build_macro_prompt(...)
+    
+    # 3. 执行分析（原子能力）
+    result = run_ai_analysis(prompt)
+    
+    # 4. 业务流程控制
+    return display_ai_analysis(...)
+```
+
+```python
+# tools 层调用 infra 层（业务依赖基础设施）
+# tools/kline_data.py
+from infra.config import get_tushare_token
+from infra.data_utils import convert_to_ts_code
+
+def get_tushare_price_df(code, ...):
+    ts_code = convert_to_ts_code(code)  # 基础设施
+    pro = get_tushare_pro()             # 基础设施
+    # ... 业务逻辑
+```
+
+#### ❌ 错误的调用方式
+
+```python
+# 错误：tools 调用 services（下层调用上层）
+# tools/kline_data.py
+from services.ai_analysis import analyze_external_assets  # ❌ 禁止！
+
+# 错误：infra 调用 tools（基础设施依赖业务）
+# infra/config.py
+from tools.utils import get_stock_list  # ❌ 禁止！
+
+# 错误：循环导入
+# tools/a.py
+from tools.b import func_b
+
+# tools/b.py
+from tools.a import func_a  # ❌ 循环导入！
+```
+
+### 函数命名规范
+
+```python
+# 获取数据：get_*
+def get_tushare_price_df(code: str) -> pd.DataFrame:
+    """使用tushare获取股票日K线数据"""
+    pass
+
+# 计算指标：calculate_*
+def calculate_macd(df: pd.DataFrame) -> pd.DataFrame:
+    """计算MACD指标"""
+    pass
+
+# 构建Prompt：build_*
+def build_macro_prompt(...) -> str:
+    """构建宏观分析Prompt"""
+    pass
+
+# 分析流程：analyze_*
+def analyze_external_assets(...) -> Optional[str]:
+    """外围资产分析业务流程"""
+    pass
+
+# 格式化：format_*
+def format_series_for_ai(...) -> str:
+    """格式化数据序列为AI分析文本格式"""
+    pass
+
+# 私有方法：_*
+def _get_ts_client():
+    """内部辅助函数"""
+    pass
+```
+
+### 类型注解规范
+
+```python
+from typing import Optional, List, Dict, Any
+import pandas as pd
+
+def get_stock_data(
+    ts_code: str,
+    start_date: str,
+    end_date: str,
+    count: int = 60
+) -> pd.DataFrame:
     """
     获取股票数据
     
     Args:
-        ts_code: 股票代码
-        start_date: 开始日期
-        end_date: 结束日期
+        ts_code: 股票代码（支持多种格式）
+        start_date: 开始日期（YYYYMMDD）
+        end_date: 结束日期（YYYYMMDD）
+        count: 返回数据条数，默认60
     
     Returns:
-        pd.DataFrame: 股票数据
-    """
-    pass
-```
-
-### 文档字符串
-- 所有公共函数必须包含 docstring
-- 使用 Google 风格：
-  ```python
-  def function_name(param1, param2):
-      """
-      函数简短描述
-      
-      详细说明（可选）
-      
-      Args:
-          param1: 参数1说明
-          param2: 参数2说明
-      
-      Returns:
-          返回值类型和说明
-      
-      Example:
-          function_name("value1", "value2")
-      """
-      pass
-  ```
-
----
-
-## 工具模块职责
-
-### `utils.py`
-核心工具函数，不依赖任何业务逻辑：
-- `get_tushare_token()`: 获取 Tushare API Token
-- `convert_to_ts_code(code)`: 转换股票代码为 Tushare 格式
-- `to_number(series)`: 类型转换
-- `normalize_trade_date(date)`: 日期格式化
-- `scrape_with_jina_reader(url, ...)`: 使用 Jina Reader 爬取网页
-- `get_xueqiu_stock_topics(...)`: 雪球股票话题爬虫
-- `weibo_comments(wid)`: 微博评论爬虫
-- `clean_filename(filename)`: 清理文件名
-
-### `kline_data.py`
-K线数据获取和绘图：
-- `get_tushare_price_df(code, ...)`: 使用 Tushare 获取日K线
-- `get_tushare_weekly_df(code, ...)`: 获取周K线
-- `get_tushare_monthly_df(code, ...)`: 获取月K线
-- `get_ak_price_df(code, ...)`: 获取日K线（统一接口）
-- `get_ak_interval_price_df(code, ...)`: 获取分时数据
-- `plotK(df, ...)`: 绘制 K线图
-- `calculate_macd(df, ...)`: 计算 MACD 指标
-
-### `technical_analysis.py`
-技术分析类，包含技术指标计算和形态识别集成：
-- `StockTechnical` 类：
-  - `new_high_analysis(...)`: 新高后涨势分析
-  - `turnover_sentiment_analysis(...)`: 高频换手情绪分析
-  - `box_breakout_analysis(...)`: 箱体突破分析
-  - `get_features(...)`: 获取所有技术特征
-  - `recognize_pattern(df)`: 识别 K线形态（独立方法）
-  - `recognize_all_patterns(df)`: 识别所有形态
-  - `get_pattern_summary(df)`: 获取形态摘要
-
-### `kline_patterns.py`
-K线形态识别算法：
-- `KLinePatternRecognizer` 类：识别器，包含 12 种形态识别方法
-- `recognize_pattern(df)`: 便捷函数，识别单一形态
-- `recognize_all_patterns(df)`: 便捷函数，识别所有形态
-- 支持形态：锤子线、倒锤子线、十字星、看涨/看跌吞没、早晨/黄昏之星、流星线、孕线、光头光脚、纺锤线、红三兵、黑三鸦
-
-### `market_data.py`
-市场数据获取：
-- `get_market_data()`: 获取大盘数据（上证、深证、创业板）
-- `get_all_stocks(select_date)`: 获取所有股票数据
-- `get_longhu_data(date)`: 获取龙虎榜数据
-- `get_dfcf_concept_boards()`: 获取东方财富概念板块
-- `get_concept_board_index(...)`: 获取概念板块指数
-- `get_financing_net_buy_series(...)`: 获取融资净买入序列
-- `get_gem_pe_series(...)`: 获取创业板 PE 序列
-- `get_market_history(...)`: 获取市场历史数据
-- `get_market_daily_stats(...)`: 获取市场日统计
-- `get_market_amount_series(...)`: 获取成交额序列
-
-### `financial_data.py`
-金融数据获取：
-- `EconomicIndicators` 类：
-  - `get_crypto_daily(...)`: 获取加密货币数据（BTC等）
-  - `get_treasury_yield(...)`: 获取美债收益率
-  - `get_gold_silver_history(...)`: 获取黄金/白银历史
-  - `get_exchange_rate(...)`: 获取汇率
-  - `get_fed_funds_rate(...)`: 获取联邦基金利率
-  - `get_cpi(...)`: 获取 CPI 数据
-
-### `storage_utils.py`
-数据存储：
-- `save_review_data(date, data, ...)`: 保存回顾数据为 JSON
-- `load_review_data(date)`: 加载回顾数据
-- `list_review_dates()`: 列出所有可用的回顾日期
-- `upsert_market_history(...)`: 更新市场历史 CSV
-- `load_market_history_df(limit)`: 加载市场历史 DataFrame
-- `df_to_dict(df)`: DataFrame 转 dict
-
-### `ai_analysis.py`
-AI 分析业务逻辑：
-- 基于 Jinja2 模板系统
-- 支持外部资产分析
-- 支持指数技术面分析
-- 支持市场情绪分析
-
-### `llm_tools.py`
-LLM 调用接口：
-- `get_llm_response(query, provider="doubao", ...)`: 统一的 LLM 调用（OpenAI 兼容）
-  - 支持 doubao、siliconflow、kimi
-- `call_kimi_print(prompt, ...)`: 使用 Kimi CLI 命用（通过 kimi 命令）
-- `clean_ai_output(raw_result)`: 清理 AI 输出（移除标签和内部格式）
-- `ai_summarize_cached(text, ...)`: 带缓存的 AI 总结
-
-### `crawlers.py`
-爬虫工具：
-- `cls_telegraphs()`: 财联社电报爬虫
-- `get_cninfo_orgid(stock_code)`: 获取巨潮资讯 orgId
-- `cninfo_announcement_spider(...)`: 巨潮资讯公告爬虫
-
----
-
-## Streamlit 特定规范
-
-### 缓存装饰器
-```python
-@st.cache_data(ttl="1h", show_spinner=False)  # 短期缓存，不显示 spinner
-def expensive_operation():
-    pass
-```
-
-### 使用 container 显示图表
-```python
-def plotK(df, container=st, ...):
-    """
-    绘制 K线图
+        pd.DataFrame: 包含open, high, low, close, volume的DataFrame
     
-    Args:
-        df: K线数据
-        container: Streamlit container，默认 st
-        ...
+    Raises:
+        ValueError: 如果股票代码格式无效
+        RuntimeError: 如果API调用失败
+    
+    Example:
+        >>> df = get_stock_data("000001.SZ", "20240101", "20241231")
+        >>> print(df.head())
     """
-    # ... 绘制代码
-    container.pyplot(fig, use_container_width=True)
-```
-
-### 数据展示
-```python
-# 使用 st.dataframe 展示数据
-st.dataframe(df, use_container_width=True)
-
-# 使用 st.metric 展示指标
-st.metric("收盘价", f"{latest['close']:.2f}", delta=f"{change_pct:.2f}%")
+    pass
 ```
 
 ---
 
-## 错误处理
+## 错误处理规范
 
 ### 日志配置
 ```python
@@ -253,61 +527,33 @@ logger = logging.getLogger(__name__)
 
 ### 异常处理模式
 ```python
-try:
-    result = risky_operation()
-except Exception as e:
-    logger.error(f"操作失败: {str(e)}")
-    raise  # 返回空 DataFrame 或 None
-```
+# 基础设施层：抛出异常，让上层处理
+def get_tushare_token() -> str:
+    token = os.environ.get("TUSHARE_TOKEN")
+    if not token:
+        raise ValueError("TUSHARE_TOKEN not found")
+    return token
 
-### 数据验证
-```python
-# 检查 DataFrame 空值
-if df is None or df.empty:
-    return pd.DataFrame()
-
-# 检查必需列
-required_cols = ["open", "close", "high", "low", "volume"]
-missing_cols = [col for col in required_cols if col not in df.columns]
-if missing_cols:
-    raise ValueError(f"缺少必需列: {missing_cols}")
-```
-
----
-
-## API 密钥管理
-
-### 环境变量优先级
-```python
-import os
-import streamlit as st
-
-def get_api_key(provider: str) -> str:
-    """
-    获取 API 密钥
-    
-    优先级：环境变量 > Streamlit secrets
-    
-    Args:
-        provider: 提供商名称（tushare/doubao/siliconflow/jina/pushplus）
-    
-    Returns:
-        str: API 密钥
-    """
-    # 1. 尝试环境变量
-    key = os.environ.get(f"{provider.upper()}_API_KEY", "").strip()
-    if key:
-        return key
-    
-    # 2. 尝试 Streamlit secrets
+# 业务原子能力层：捕获并转换为用户友好的错误
+def get_tushare_price_df(code: str) -> pd.DataFrame:
     try:
-        key = st.secrets.get(f"{provider.lower()}_api_key", "")
-        if key:
-            return key
-    except Exception:
-        pass
-    
-    raise ValueError(f"未配置 {provider} 的 API 密钥")
+        pro = get_tushare_pro()
+        df = pro.daily(ts_code=code)
+        return df
+    except Exception as e:
+        logger.error(f"获取股票数据失败: {code}, error: {e}")
+        raise RuntimeError(f"无法获取 {code} 的数据，请检查代码或网络连接")
+
+# 业务流程层：捕获并提供降级方案
+def analyze_external_assets(...) -> Optional[str]:
+    try:
+        prompt = build_macro_prompt(...)
+        return run_ai_analysis(prompt)
+    except Exception as e:
+        logger.error(f"AI分析失败: {e}")
+        if show_ui:
+            st.error("AI分析暂时不可用，请稍后重试")
+        return None
 ```
 
 ---
@@ -317,12 +563,13 @@ def get_api_key(provider: str) -> str:
 ### Commit 消息规范
 ```bash
 # 格式：<type>(<scope>): <subject>
+# scope: infra | tools | services | pages | docs
 
 # 示例：
-git commit -m "feat(tools): 新增 K线形态识别功能"
-git commit -m "fix(crawlers): 修复巨潮资讯爬虫超时问题"
-git commit -m "refactor(stock_data): 拆分数据获取和绘图模块"
-git commit -m "docs: 更新项目代码规范文档"
+git commit -m "feat(infra): 新增 Jina Reader 网页爬取功能"
+git commit -m "fix(tools): 修复巨潮资讯爬虫超时问题"
+git commit -m "refactor(services): 优化AI分析业务流程"
+git commit -m "docs: 更新架构规范文档"
 ```
 
 ### Commit 类型
@@ -337,89 +584,13 @@ git commit -m "docs: 更新项目代码规范文档"
 
 ---
 
-## 测试指南
-
-### 数据获取函数测试
-```python
-# 测试 Tushare 数据获取
-try:
-    df = get_tushare_price_df("600000.SH")
-    assert not df.empty
-    assert len(df) <= 60  # count 参数生效
-except Exception as e:
-    logger.error(f"测试失败: {e}")
-```
-
-### K线形态识别测试
-```python
-from tools import recognize_pattern, KLinePatternRecognizer
-
-# 测试锤子线
-recognizer = KLinePatternRecognizer()
-pattern = recognizer._recognize_hammer(test_df)
-assert pattern is not None
-assert pattern.code == "hammer"
-```
-
----
-
-## 常见问题解决方案
-
-### Tushare API 限制
-- 免费版每分钟 200 次请求
-- 使用 `@st.cache_data()` 减少 API 调用
-- 设置合理的 TTL（short=5min, medium=1h, long=1d）
-
-### Streamlit 缓存问题
-- 缓存使用函数签名作为键
-- 避免在函数内部修改参数后再缓存
-- 使用 `hashlib.md5(prompt.encode())` 作为缓存键的一部分
-
-### 数据类型转换
-- 使用 `pd.to_numeric(series, errors="coerce")` 处理混合类型
-- 处理 NaN：`df.dropna()` 或 `df.fillna()`
-- 日期转换：`pd.to_datetime(date_str, errors="coerce")`
-
----
-
-## 后续开发建议
-
-### 可以添加的功能
-1. **更多技术指标**
-   - BOLL 布林带
-   - ATK 指标
-   - 威廉指标
-   
-2. **更多 K线形态**
-   - 三只乌鸦
-   - 上升三角形/下降三角形
-   - 三只喜鹊
-   
-3. **数据增强**
-   - 实时数据获取
-   - 板块数据关联分析
-   - 龙虎榜席位追踪
-   
-4. **AI 功能扩展**
-   - 新闻情感分析
-   - 研报智能摘要
-   - 策略报告生成
-
-### 代码优化方向
-1. 使用异步请求加速数据获取
-2. 添加单元测试覆盖核心功能
-3. 考虑使用类型注解提升 IDE 支持
-4. 添加性能监控和日志
-
----
-
 ## 维护信息
 
 **维护者：** chenh
 
-**最后更新：** 2026-03-26
+**架构版本：** v3.0 - 三层架构重构版
 
-**版本：** v2.0 - 重构后版本
+**最后更新：** 2026-03-26
 
 ---
 
@@ -427,5 +598,4 @@ assert pattern.code == "hammer"
 
 - Tushare API: https://tushare.pro/document/2
 - AkShare 文档: https://akshare.akfamily.xyz/
-- Plotly 文档: https://plotly.com/python/
 - Streamlit 文档: https://docs.streamlit.io/
