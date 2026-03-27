@@ -28,6 +28,28 @@ from infra.config import get_tushare_token
 
 logger = logging.getLogger(__name__)
 
+# 允许的数据库字段（防止SQL注入）
+ALLOWED_COLUMNS = {
+    "ts_code",
+    "trade_date",
+    "close",
+    "turnover_rate",
+    "turnover_rate_f",
+    "volume_ratio",
+    "pe",
+    "pe_ttm",
+    "ps",
+    "ps_ttm",
+    "pb",
+    "pb_ttm",
+    "dv_ratio",
+    "dv_ttm",
+    "total_share",
+    "float_share",
+    "total_mv",
+    "circ_mv",
+}
+
 
 def _safe_float(val):
     """安全转换为float，处理NaN和异常值"""
@@ -42,6 +64,7 @@ def _safe_float(val):
 _save_queue: queue.Queue = queue.Queue(maxsize=1000)
 _save_worker: Optional[threading.Thread] = None
 _worker_running = False
+_worker_lock = threading.Lock()
 
 
 def _background_save_worker():
@@ -88,15 +111,16 @@ def _background_save_worker():
 
 
 def _ensure_worker_running():
-    """确保后台保存线程已启动"""
+    """确保后台保存线程已启动（线程安全）"""
     global _save_worker, _worker_running
 
-    if _save_worker is None or not _save_worker.is_alive():
-        _save_worker = threading.Thread(
-            target=_background_save_worker, name="DailyBasicSaveWorker", daemon=True
-        )
-        _save_worker.start()
-        logger.info("启动后台保存线程")
+    with _worker_lock:
+        if _save_worker is None or not _save_worker.is_alive():
+            _save_worker = threading.Thread(
+                target=_background_save_worker, name="DailyBasicSaveWorker", daemon=True
+            )
+            _save_worker.start()
+            logger.info("启动后台保存线程")
 
 
 def shutdown_worker():
@@ -162,6 +186,12 @@ def save_daily_basic_sync(df: pd.DataFrame) -> int:
             return 0
 
         columns = list(records[0].keys())
+
+        # 验证列名安全
+        if not set(columns).issubset(ALLOWED_COLUMNS):
+            invalid_cols = set(columns) - ALLOWED_COLUMNS
+            raise ValueError(f"Invalid columns detected: {invalid_cols}")
+
         placeholders = ",".join(["?"] * len(columns))
         sql = f"""
             INSERT OR REPLACE INTO stock_daily_basic ({",".join(columns)})
@@ -213,6 +243,11 @@ def save_daily_basic_many(records: List[dict]) -> int:
             "total_mv",
             "circ_mv",
         ]
+
+        # 验证列名安全
+        if not set(columns).issubset(ALLOWED_COLUMNS):
+            invalid_cols = set(columns) - ALLOWED_COLUMNS
+            raise ValueError(f"Invalid columns detected: {invalid_cols}")
 
         for record in records:
             row = tuple(record.get(col) for col in columns)

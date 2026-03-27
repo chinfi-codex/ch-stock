@@ -45,3 +45,8 @@ Thumbs.db
 
 # Local-only data snapshots
 datas/reviews/*.json
+
+# Database files
+*.db
+*.db-journal
+*.db-wal
