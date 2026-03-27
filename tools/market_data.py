@@ -13,6 +13,7 @@ import tushare as ts
 from .utils import get_stock_list
 from infra.config import get_tushare_token
 from infra.data_utils import to_number
+from .daily_basic_storage import get_daily_basic_smart, save_daily_basic_async
 
 
 def _get_index_amount(index_df, stat_date: str) -> float:
@@ -377,9 +378,13 @@ def get_all_stocks(base_date=None):
         return pd.DataFrame()
 
     pro = ts.pro_api(token)
-    daily_basic = pro.daily_basic(
-        trade_date=trade_date, fields="ts_code,trade_date,total_mv"
+    
+    daily_basic = get_daily_basic_smart(
+        trade_date=trade_date,
+        fields=["ts_code", "trade_date", "total_mv"],
+        use_cache=True
     )
+    
     daily = pro.daily(trade_date=trade_date, fields="ts_code,trade_date,pct_chg,amount")
     if daily_basic is None or daily_basic.empty or daily is None or daily.empty:
         return pd.DataFrame()

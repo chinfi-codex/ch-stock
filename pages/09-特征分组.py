@@ -17,6 +17,7 @@ import requests
 from tools import plotK
 from tools.kline_data import get_ak_price_df
 from tools.ai_analysis import analyze_stock_classification
+from tools.daily_basic_storage import get_daily_basic_smart
 
 
 def _section_title(title):
@@ -135,11 +136,15 @@ def get_stock_total_mv(code: str) -> float:
         ts.set_token(token)
         pro = ts.pro_api()
 
-        # 获取股票基本信息
-        df = pro.daily_basic(
-            ts_code=f"{code}.SZ" if code.startswith(("0", "3")) else f"{code}.SH",
-            fields="ts_code,total_mv",
+        # 获取股票基本信息（优先本地库）
+        ts_code = f"{code}.SZ" if code.startswith(("0", "3")) else f"{code}.SH"
+        
+        df = get_daily_basic_smart(
+            trade_date=datetime.datetime.now().strftime("%Y%m%d"),
+            fields=["ts_code", "total_mv"],
+            use_cache=True
         )
+        
         if df is not None and not df.empty:
             # total_mv 单位是万元，转换为亿元
             return float(df["total_mv"].iloc[0]) / 10000
@@ -211,8 +216,12 @@ def get_capacity_stocks():
         if df_daily is None or df_daily.empty:
             return []
 
-        # 获取每日基础数据（包含总市值）
-        df_basic = pro.daily_basic(trade_date=today, fields="ts_code,total_mv")
+        # 获取每日基础数据（包含总市值，优先本地库）
+        df_basic = get_daily_basic_smart(
+            trade_date=today,
+            fields=["ts_code", "total_mv"],
+            use_cache=True
+        )
         if df_basic is None or df_basic.empty:
             return []
 
