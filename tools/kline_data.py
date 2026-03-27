@@ -16,7 +16,7 @@ import pandas as pd
 import streamlit as st
 import tushare as ts
 
-from .utils import convert_to_ts_code
+from infra.data_utils import convert_to_ts_code
 
 # 配置日志
 logging.basicConfig(

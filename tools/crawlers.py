@@ -14,7 +14,8 @@ from bs4 import BeautifulSoup
 import logging
 import os
 from urllib.parse import urljoin
-from .utils import scrape_with_jina_reader, clean_filename
+from infra.web_scraper import scrape_with_jina_reader
+from infra.storage import clean_filename
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.DEBUG)

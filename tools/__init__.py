@@ -1,9 +1,11 @@
 """
 股票分析工具包
-包含股票数据、爬虫、大模型、金融数据、公告数据、电报数据等功能模块
+包含业务原子能力：股票数据、爬虫、金融数据等功能模块
+
+注意：通用基础设施已迁移到 infra/ 目录
 """
 
-# K线数据相关（从 stock_data 拆分）
+# K线数据相关
 from .kline_data import (
     get_ak_price_df,
     get_ak_interval_price_df,
@@ -14,7 +16,7 @@ from .kline_data import (
     calculate_macd,
 )
 
-# 技术分析相关（从 stock_data 拆分，新增K线形态识别）
+# 技术分析相关
 from .technical_analysis import StockTechnical
 
 # K线形态识别
@@ -49,22 +51,24 @@ from .crawlers import (
     cninfo_announcement_spider,
 )
 
-# 大模型相关
-from .llm_tools import (
-    get_llm_response,
-    call_kimi_print,
-    clean_ai_output,
-    ai_summarize_cached,
-)
-
-# 工具函数
+# 工具函数（业务相关）
 from .utils import (
     get_stock_list,
     get_xueqiu_stock_topics,
     weibo_comments,
-    scrape_with_jina_reader,
-    clean_filename,
-    save_review_data,
+)
+
+# AI分析原子能力
+from .ai_analysis import (
+    build_macro_prompt,
+    build_market_overview_prompt,
+    build_index_analysis_prompt,
+    build_stock_classification_prompt,
+    run_ai_analysis,
+    display_ai_analysis,
+    format_series_for_ai,
+    format_market_summary_for_ai,
+    format_stock_list_for_classification,
 )
 
 __all__ = [
@@ -100,15 +104,18 @@ __all__ = [
     # 爬虫
     "cls_telegraphs",
     "cninfo_announcement_spider",
-    # 大模型
-    "get_llm_response",
-    "call_kimi_print",
-    "clean_ai_output",
-    "ai_summarize_cached",
-    # 工具函数
+    # 工具函数（业务相关）
     "get_stock_list",
     "get_xueqiu_stock_topics",
     "weibo_comments",
-    "scrape_with_jina_reader",
-    "clean_filename",
+    # AI分析原子能力
+    "build_macro_prompt",
+    "build_market_overview_prompt",
+    "build_index_analysis_prompt",
+    "build_stock_classification_prompt",
+    "run_ai_analysis",
+    "display_ai_analysis",
+    "format_series_for_ai",
+    "format_market_summary_for_ai",
+    "format_stock_list_for_classification",
 ]

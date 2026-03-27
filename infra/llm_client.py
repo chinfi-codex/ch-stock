@@ -1,5 +1,5 @@
 """
-大模型工具模块
+大模型客户端模块
 包含多种LLM提供商的统一调用接口
 """
 
@@ -145,11 +145,6 @@ def get_llm_response(query, provider="doubao", model=None, system_message=None):
     return _create_completion(
         api_key, config["base_url"], config["default_model"], sys_msg, query
     )
-
-
-# =============================================================================
-# Kimi CLI Support (从 ai_utils.py 合并)
-# =============================================================================
 
 
 @st.cache_data(ttl="1h", show_spinner=False)
