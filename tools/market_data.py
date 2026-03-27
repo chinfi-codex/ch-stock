@@ -10,7 +10,9 @@ import os
 import json
 from datetime import datetime, date
 import tushare as ts
-from .utils import get_stock_list, get_tushare_token, to_number
+from .utils import get_stock_list
+from infra.config import get_tushare_token
+from infra.data_utils import to_number
 
 
 def _get_index_amount(index_df, stat_date: str) -> float:

@@ -5,7 +5,6 @@
 
 import os
 import streamlit as st
-import tushare as ts
 
 
 def get_tushare_token() -> str:
@@ -49,21 +48,3 @@ def get_tushare_token() -> str:
         pass
 
     return ""
-
-
-def get_tushare_pro():
-    """
-    获取 Tushare Pro API 客户端
-
-    Returns:
-        ts.ProApi: Tushare Pro API 客户端
-
-    Raises:
-        RuntimeError: 如果无法获取 TUSHARE_TOKEN
-    """
-    token = get_tushare_token()
-    if not token:
-        raise RuntimeError(
-            "Missing TUSHARE_TOKEN: 请设置环境变量或在 .streamlit/secrets.toml 中配置"
-        )
-    return ts.pro_api(token)
