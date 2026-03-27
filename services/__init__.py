@@ -4,5 +4,6 @@
 """
 
 from . import ai_analysis
+from . import daily_basic_sync
 
-__all__ = ["ai_analysis"]
+__all__ = ["ai_analysis", "daily_basic_sync"]
