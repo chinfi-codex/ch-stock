@@ -58,6 +58,18 @@ from .utils import (
     weibo_comments,
 )
 
+# Daily Basic 存储相关
+from .daily_basic_storage import (
+    query_daily_basic,
+    get_daily_basic_smart,
+    save_daily_basic_async,
+    save_daily_basic_sync,
+    get_missing_dates,
+    check_data_existence,
+    get_last_sync_date,
+    get_database_path,
+)
+
 # AI分析原子能力
 from .ai_analysis import (
     build_macro_prompt,
@@ -108,6 +120,15 @@ __all__ = [
     "get_stock_list",
     "get_xueqiu_stock_topics",
     "weibo_comments",
+    # Daily Basic 存储
+    "query_daily_basic",
+    "get_daily_basic_smart",
+    "save_daily_basic_async",
+    "save_daily_basic_sync",
+    "get_missing_dates",
+    "check_data_existence",
+    "get_last_sync_date",
+    "get_database_path",
     # AI分析原子能力
     "build_macro_prompt",
     "build_market_overview_prompt",

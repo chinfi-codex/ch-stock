@@ -8,6 +8,7 @@ from . import llm_client
 from . import storage
 from . import data_utils
 from . import web_scraper
+from . import database
 
 __all__ = [
     "config",
@@ -15,4 +16,5 @@ __all__ = [
     "storage",
     "data_utils",
     "web_scraper",
+    "database",
 ]
