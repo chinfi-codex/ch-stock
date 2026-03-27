@@ -292,15 +292,24 @@ from tools.utils import (
 ```python
 # 职责：K线数据获取和可视化
 # 依赖：infra.config, infra.data_utils
+# 数据源：默认使用 Tushare API（高质量、稳定）
 
 from tools.kline_data import (
-    get_tushare_price_df,     # 获取日K线
-    get_tushare_weekly_df,    # 获取周K线
-    get_tushare_monthly_df,   # 获取月K线
+    get_tushare_price_df,     # 获取日K线（Tushare）
+    get_tushare_weekly_df,    # 获取周K线（Tushare）
+    get_tushare_monthly_df,   # 获取月K线（Tushare）
+    get_ak_price_df,          # 获取日K线（统一接口，底层使用Tushare）
     plotK,                    # 绘制K线图
     calculate_macd,           # 计算MACD指标
 )
 ```
+
+**数据获取规范**：
+- **默认数据源**：所有股票K线数据默认使用 **Tushare API**
+- **原因**：Tushare 数据质量高、稳定性好、字段标准化
+- **Token 配置**：通过 `infra.config.get_tushare_token()` 获取
+- **备选方案**：仅在 Tushare 不可用时才考虑 AKShare 等其他数据源
+- **统一入口**：使用 `get_ak_price_df()` 作为统一接口，内部调用 Tushare
 
 #### `tools/technical_analysis.py` - 技术分析
 ```python
@@ -639,10 +648,11 @@ def analyze_external_assets(...) -> Optional[str]:
 - ✅ 重构一个模块 → commit
 - ✅ 更新文档 → commit
 
-**时机合适时就 push**：
-- 每天下班前 push
-- 完成一个完整功能后 push
-- 多人协作时及时 push（避免冲突）
+**Push 规则**：
+- ❌ **禁止自动 push**：不要每次 commit 后都自动 push
+- ✅ **Code Review 后 push**：仅在代码审查通过后，接到明确指令才 push
+- ✅ **功能完成时 push**：一个完整功能开发完成并通过审查后 push
+- ✅ **下班前 push**：每天下班前，确保当日工作已 commit 并通过审查后 push
 
 ```bash
 # 示例工作流程
@@ -651,7 +661,8 @@ git commit -m "feat(tools): 新增K线形态识别功能"
 # ... 继续开发 ...
 git add .
 git commit -m "fix(tools): 修复锤子线识别逻辑"
-# 功能完成，push到远程
+# 等待 Code Review 通过...
+# 接到指令后 push
 git push
 ```
 
@@ -659,7 +670,8 @@ git push
 
 **简单修改**（单文件、小于100行）：
 - 直接在 `master` 分支操作
-- 及时 commit 和 push
+- 及时 commit
+- 接到指令后 push
 
 **较大改动**（多文件重构、新功能模块）：
 - 必须创建 feature 分支
