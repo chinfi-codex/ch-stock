@@ -13,12 +13,12 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(
 
 try:
     from infra.database import init_database, get_db_stats
-    from tools.daily_basic_storage import (
-        get_daily_basic_smart,
+    from infra.daily_basic_repository import (
         save_daily_basic_async,
         check_data_existence,
         get_last_sync_date
     )
+    from services.daily_basic_service import get_daily_basic_smart
     from services.daily_basic_sync import (
         sync_single_date,
         get_sync_status,

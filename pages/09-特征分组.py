@@ -14,10 +14,11 @@ import streamlit as st
 import pandas as pd
 import requests
 
+from infra.config import get_tushare_token
 from tools import plotK
 from tools.kline_data import get_ak_price_df
-from tools.ai_analysis import analyze_stock_classification
-from tools.daily_basic_storage import get_daily_basic_smart
+from services.ai_analysis import analyze_stock_classification
+from services.daily_basic_service import get_daily_basic_smart
 
 
 def _section_title(title):
@@ -129,7 +130,7 @@ def get_stock_total_mv(code: str) -> float:
     try:
         import tushare as ts
 
-        token = st.secrets.get("tushare_token") or os.environ.get("TUSHARE_TOKEN")
+        token = get_tushare_token()
         if not token:
             return 0
 
@@ -199,7 +200,7 @@ def get_capacity_stocks():
     try:
         import tushare as ts
 
-        token = st.secrets.get("tushare_token") or os.environ.get("TUSHARE_TOKEN")
+        token = get_tushare_token()
         if not token:
             return []
 

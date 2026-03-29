@@ -7,7 +7,6 @@ K线数据模块
 
 import datetime
 import logging
-import os
 
 import akshare as ak
 import mplfinance as mpf
@@ -16,6 +15,7 @@ import pandas as pd
 import streamlit as st
 import tushare as ts
 
+from infra.config import get_tushare_token
 from infra.data_utils import convert_to_ts_code
 
 # 配置日志
@@ -25,9 +25,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # tushare配置
-TS_TOKEN = os.getenv(
-    "TUSHARE_TOKEN", "943ca25f1428e5ed6d7d752b6b1496e6afdcac48ace4cf54e0d82a6e"
-)
+TS_TOKEN = get_tushare_token()
 _ts_pro_client = None
 
 

@@ -7,25 +7,25 @@ import datetime
 import plotly.graph_objects as go
 from tools import (
     plotK,
-    get_market_data,
-    get_all_stocks,
     get_financing_net_buy_series,
     get_gem_pe_series,
 )
 from tools.kline_data import get_ak_price_df
 from tools.financial_data import EconomicIndicators
-from tools.ai_analysis import (
-    analyze_external_assets,
-    analyze_index_technical,
-    analyze_market_overview,
-    format_series_for_ai,
-)
-from tools.utils import (
+from tools.ai_analysis import format_series_for_ai
+from infra.data_utils import (
     latest_metric_from_df,
     calc_pct_change,
     series_from_df,
-    filter_st_bj_stocks,
 )
+from services.ai_analysis import (
+    analyze_external_assets,
+    analyze_index_technical,
+    analyze_market_overview,
+)
+from services.market_overview_service import get_market_data
+from services.stock_universe_service import get_all_stocks
+from tools.utils import filter_st_bj_stocks
 from data_sources import (
     _normalize_top_stocks_df,
     _df_to_records,

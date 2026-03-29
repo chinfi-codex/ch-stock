@@ -2,770 +2,344 @@
 
 ## 架构哲学
 
-### 分层架构设计
+### 分层架构
 
-本项目采用**三层架构**设计，实现职责分离和代码复用：
+本项目采用四层职责划分：
 
-```
-┌─────────────────────────────────────────────┐
-│           Presentation Layer                │
-│   pages/          Streamlit 页面展示         │
-│   app.py          主应用入口                │
-└──────────────────┬──────────────────────────┘
-                   │ 调用
-┌──────────────────▼──────────────────────────┐
-│          Business Logic Layer               │
-│   services/       业务流程编排（AI分析等）   │
-└──────────────────┬──────────────────────────┘
-                   │ 组合调用
-┌──────────────────▼──────────────────────────┐
-│        Atomic Capability Layer              │
-│   tools/          业务原子能力               │
-│   ├── kline_data.py      K线数据获取        │
-│   ├── technical_analysis.py 技术分析        │
-│   ├── market_data.py     市场数据           │
-│   └── ...                                  │
-└──────────────────┬──────────────────────────┘
-                   │ 依赖
-┌──────────────────▼──────────────────────────┐
-│       Infrastructure Layer                  │
-│   infra/          基础设施（通用、可复用）   │
-│   ├── config.py          配置管理           │
-│   ├── llm_client.py      LLM客户端         │
-│   ├── data_utils.py      数据处理          │
-│   └── ...                                  │
-└─────────────────────────────────────────────┘
+```text
+pages/app.py -> services -> tools -> infra
 ```
 
-### 核心设计原则
+- `pages/` 与 `app.py`
+  - Streamlit 展示层
+  - 负责页面渲染、交互和调用 service
+- `services/`
+  - 业务流程编排层
+  - 组合多个 tool / infra 完成完整业务场景
+- `tools/`
+  - 业务原子能力层
+  - 只保留单一职责、可复用、可独立调用的股票领域能力
+- `infra/`
+  - 基础设施层
+  - 提供配置、仓储、模板、通用数据处理、数据库等能力
 
-#### 1. 职责分离（Separation of Concerns）
+### 依赖方向
 
-- **infra/**: 通用基础设施，**与业务无关**，可被任何项目复用
-- **tools/**: 业务原子能力，**单一职责**，可独立使用
-- **services/**: 业务流程编排，**组合原子能力**完成复杂业务场景
-- **pages/**: UI展示层，**仅负责渲染**，不包含业务逻辑
+依赖只能自上而下：
 
-#### 2. 原子化能力（Atomic Capabilities）
-
-业务功能拆解为最小可复用单元：
-- ✅ `get_tushare_price_df()` - 获取K线数据（原子能力）
-- ✅ `calculate_macd()` - 计算MACD指标（原子能力）
-- ✅ `build_macro_prompt()` - 构建分析Prompt（原子能力）
-- ❌ `analyze_external_assets()` - 这是业务流程（在services层）
-
-#### 3. 依赖方向（Dependency Direction）
-
-依赖只能**自上而下**：
-```
-services → tools → infra
-pages → services/tools
+```text
+pages -> services/tools
+services -> tools/infra
+tools -> infra
 ```
 
-**禁止反向依赖**：
-- ❌ infra 不能依赖 tools
-- ❌ tools 不能依赖 services
-- ❌ services 不能依赖 pages
+禁止：
 
----
+- `infra -> tools/services/pages`
+- `tools -> services/pages`
+- `services -> pages`
+- 循环导入
 
-## 项目目标与演进方向
+### 当前定位
 
-### 项目定位
+`ch-stock` 是 A 股数据复盘中台，当前重点是：
 
-**ch-stock** 是一个 **A股数据复盘中台**，定位为：
+- 多源数据整合
+- 市场复盘与专题分析
+- AI 辅助分析
+- 为后续 API 输出、量化策略与 OpenClaw 对接提供稳定数据层
 
-> 🎯 **A股市场的数据整合、分析与复盘一体化平台**
+## 当前项目结构
 
-核心使命：
-- 📊 **数据整合**：聚合多源数据（Tushare、AKShare、东方财富等）
-- 🔍 **智能分析**：结合AI技术进行市场分析和个股研究
-- 📝 **自动复盘**：支持每日市场复盘、技术指标监控
-- 🔌 **开放对接**：为后续量化策略、OpenClaw生态提供数据支撑
-
-### 演进方向
-
-#### 阶段一：数据中台建设 ✅ 当前阶段
-- [x] 多源数据接入（Tushare、东方财富、巨潮资讯）
-- [x] 数据标准化和清洗
-- [x] 基础技术指标计算
-- [x] AI辅助分析能力
-
-#### 阶段二：智能分析平台 🚧 进行中
-- [ ] 实时数据推送（WebSocket）
-- [ ] 多因子选股引擎
-- [ ] 策略回测框架
-- [ ] 个性化监控预警
-
-#### 阶段三：生态对接与开放 🔮 规划
-- [ ] **OpenClaw 数据对接**：标准化数据API输出
-- [ ] 量化交易平台集成
-- [ ] 社区化功能（策略分享、讨论）
-- [ ] 移动端适配
-
-### 与 OpenClaw 的对接规划
-
-```
-┌─────────────────────────────────────────────┐
-│              OpenClaw 生态                   │
-│  ┌──────────┐  ┌──────────┐  ┌──────────┐  │
-│  │ 量化策略  │  │ 智能预警  │  │ 组合管理  │  │
-│  └────┬─────┘  └────┬─────┘  └────┬─────┘  │
-│       │             │             │         │
-│       └─────────────┼─────────────┘         │
-│                     │                       │
-│              ┌──────▼──────┐               │
-│              │ 标准化API   │               │
-│              │  (REST)     │               │
-│              └──────┬──────┘               │
-└─────────────────────┼───────────────────────┘
-                      │
-┌─────────────────────▼───────────────────────┐
-│         ch-stock 数据复盘中台               │
-│  ┌──────────┐  ┌──────────┐  ┌──────────┐  │
-│  │ 市场数据  │  │ 个股分析  │  │ 技术指标  │  │
-│  └──────────┘  └──────────┘  └──────────┘  │
-└─────────────────────────────────────────────┘
-```
-
-**对接标准**：
-- 输出标准化的 REST API
-- 支持 OpenAPI 规范
-- 数据格式：JSON / Protobuf
-- 认证方式：API Key
-
----
-
-#### 4. 显式优于隐式（Explicit over Implicit）
-
-- 跨层调用必须**显式导入**，禁止使用通配符导入
-- 函数职责**单一且明确**，避免"万能函数"
-- 错误处理**显式抛出**，不静默吞掉异常
-
----
-
-## 项目结构
-
-```
+```text
 ch-stock/
-├── app.py                      # Streamlit 主应用入口
-├── requirements.txt            # Python 依赖
-├── data_sources.py             # 数据源适配层（兼容旧代码）
-│
-├── infra/                      # 基础设施层（通用、可复用）
-│   ├── __init__.py            # 导出 infra 模块
-│   ├── config.py              # 配置管理（Token获取等）
-│   ├── llm_client.py          # LLM调用封装
-│   ├── data_utils.py          # 数据处理（代码转换等）
-│   ├── storage.py             # 文件存储工具
-│   └── web_scraper.py         # 网页爬取
-│
-├── tools/                      # 业务原子能力层
-│   ├── __init__.py            # 导出 tools 模块
-│   ├── utils.py               # 股票业务工具函数
-│   ├── kline_data.py          # K线数据获取 + 绘图
-│   ├── technical_analysis.py  # 技术指标计算
-│   ├── kline_patterns.py      # K线形态识别
-│   ├── market_data.py         # 市场数据获取
-│   ├── financial_data.py      # 金融数据获取
-│   ├── crawlers.py            # 数据爬虫
-│   └── ai_analysis.py         # AI分析原子能力
-│
-├── services/                   # 业务流程层
-│   ├── __init__.py            # 导出 services 模块
-│   └── ai_analysis.py         # AI分析业务流程编排
-│
-├── pages/                      # UI展示层（Streamlit多页面）
-│   ├── 08-关注分组.py
-│   ├── 09-特征分组.py
-│   └── 10-公司投研专家.py
-│
-└── datas/                      # 数据存储目录
-    └── reviews/
+├── app.py
+├── data_sources.py
+├── infra/
+│   ├── config.py
+│   ├── daily_basic_repository.py
+│   ├── database.py
+│   ├── data_utils.py
+│   ├── llm_client.py
+│   ├── market_history_repository.py
+│   ├── prompt_templates.py
+│   ├── storage.py
+│   └── web_scraper.py
+├── services/
+│   ├── ai_analysis.py
+│   ├── daily_basic_service.py
+│   ├── daily_basic_sync.py
+│   ├── market_analysis_service.py
+│   ├── market_overview_service.py
+│   ├── stock_universe_service.py
+│   └── technical_feature_service.py
+├── tools/
+│   ├── ai_analysis.py
+│   ├── crawlers.py
+│   ├── financial_data.py
+│   ├── kline_data.py
+│   ├── kline_patterns.py
+│   ├── market_data.py
+│   ├── p5w_interaction.py
+│   ├── technical_analysis.py
+│   ├── utils.py
+│   └── zsxq.py
+├── pages/
+└── datas/
 ```
 
----
+## 分层职责说明
 
-## 分层模块设计说明
+### infra
 
-### 第一层：Infrastructure（基础设施层）
+`infra/` 只放与业务无关、可复用的底层能力。
 
-**定位**：通用、与业务无关的基础设施，可被任何项目复用。
+当前主要模块：
 
-**设计原则**：
-- 单一职责，功能原子化
-- 不依赖项目业务逻辑
-- 提供稳定的抽象接口
+- `config.py`
+  - 统一配置读取入口
+  - 当前集中管理：
+    - `get_tushare_token()`
+    - `get_alpha_vantage_key()`
+    - `get_jina_api_key()`
+    - `get_llm_api_key(provider)`
+    - `get_zsxq_cookie()`
+    - `get_zsxq_group_ids()`
+    - `get_zsxq_api_timeout()`
+- `data_utils.py`
+  - 通用数据处理
+  - 包含代码转换、数值转换、通用序列提取和涨跌幅计算
+- `prompt_templates.py`
+  - Prompt 模板环境与模板读取
+- `daily_basic_repository.py`
+  - `daily_basic` 数据仓储
+  - 只负责存取，不负责回源流程
+- `market_history_repository.py`
+  - 市场历史 CSV 读写
+- `database.py`
+  - SQLite 连接与初始化
+- `llm_client.py`
+  - 统一 LLM 调用封装
+- `web_scraper.py`
+  - 通用网页抓取
+- `storage.py`
+  - 通用文件工具
 
-#### `infra/config.py` - 配置管理
+规则：
+
+- 所有 token / key / secrets / env 读取统一从 `infra.config` 进入
+- repository 只做存取，不做业务编排
+- infra 不允许依赖 `tools` 或 `services`
+
+### tools
+
+`tools/` 只保留业务原子能力。
+
+#### 已确认属于原子能力的模块
+
+- `tools/kline_data.py`
+  - K 线数据获取
+  - `calculate_macd()`
+  - `plotK()` 作为当前特例保留在 tools，不在本轮继续下沉
+- `tools/kline_patterns.py`
+  - K 线形态识别纯算法
+- `tools/technical_analysis.py`
+  - 单项技术分析能力
+  - 保留周/月聚合、新高分析、换手情绪、箱体突破、形态识别
+  - 不再负责特征组合编排
+- `tools/market_data.py`
+  - 只保留原子市场数据获取
+  - 当前保留：
+    - `get_financing_net_buy_series`
+    - `get_gem_pe_series`
+    - `get_dfcf_concept_boards`
+    - `get_concept_board_index`
+    - `get_market_daily_stats`
+    - `get_market_amount_series`
+- `tools/financial_data.py`
+  - 汇率、利率、商品、加密资产、宏观指标
+- `tools/crawlers.py`
+  - 财联社、巨潮资讯等单一数据源抓取
+- `tools/ai_analysis.py`
+  - 只保留数据格式化、prompt 构建、单次 AI 调用
+- `tools/utils.py`
+  - 只保留股票业务工具
+  - 当前保留：
+    - `filter_st_bj_stocks`
+    - `get_stock_list`
+    - `get_xueqiu_stock_topics`
+    - `weibo_comments`
+- `tools/p5w_interaction.py`
+  - 全景网互动易抓取原子能力
+- `tools/zsxq.py`
+  - 知识星球主题抓取原子能力
+  - 不再在 `tools` 内做配置直读和本地文件落盘
+
+#### 已从 tools 移出的职责
+
+以下职责已迁出，不允许重新放回 `tools/`：
+
+- `display_ai_analysis`
+- `analyze_stock_classification`
+- `get_market_data`
+- `get_market_history`
+- `get_all_stocks`
+- `get_longhu_data`
+- `daily_basic` 存储与智能回源
+- `technical_analysis.get_features`
+- 通用数据工具：
+  - `latest_metric_from_df`
+  - `calc_pct_change`
+  - `series_from_df`
+
+规则：
+
+- tool 函数只做一件事
+- 不在 `tools` 里混入 Streamlit 页面逻辑
+- 不在 `tools` 里混入本地存储编排、数据库同步策略、缓存回源流程
+- 除 `plotK()` 之外，避免把 UI 渲染逻辑放进 tools
+
+### services
+
+`services/` 负责业务流程编排。
+
+当前模块：
+
+- `services/ai_analysis.py`
+  - AI 分析完整流程
+  - 包含展示、外围资产分析、市场概览分析、指数技术分析、股票分类分析
+- `services/daily_basic_service.py`
+  - `daily_basic` 本地优先查询、缺失回源、缺失日期计算
+- `services/daily_basic_sync.py`
+  - 历史同步、最近 N 天同步、状态查询
+- `services/market_overview_service.py`
+  - 市场总览流程
+  - 组合指数、市场情绪、历史落盘
+- `services/stock_universe_service.py`
+  - 全市场股票池聚合
+- `services/market_analysis_service.py`
+  - 龙虎榜等专题市场分析流程
+- `services/technical_feature_service.py`
+  - 技术特征组合编排
+
+规则：
+
+- 业务流程统一放 service
+- service 可以组合多个 tool 和 repository
+- service 可以处理降级、流程控制、补数策略、展示辅助
+- 页面优先调用 service，而不是直接拼装 tool
+
+### pages / app
+
+页面层只负责：
+
+- 接收用户输入
+- 调用 service / 少量原子 tool
+- 展示结果
+
+禁止：
+
+- 在页面里直接拼装复杂业务流程
+- 在页面里直接读取 secrets / env
+- 在页面里直接处理仓储同步逻辑
+
+## 当前推荐调用方式
+
+### 正确示例
+
 ```python
-# 职责：Token获取、配置读取
-# 使用方式：
-from infra.config import get_tushare_token
-
-token = get_tushare_token()  # 自动处理优先级：环境变量 > secrets > .env
+from services.market_overview_service import get_market_data
+from services.stock_universe_service import get_all_stocks
+from services.ai_analysis import analyze_stock_classification
+from services.daily_basic_service import get_daily_basic_smart
 ```
 
-**关键函数**：
-- `get_tushare_token()` - 获取Tushare Token（支持多源优先级）
-
-#### `infra/llm_client.py` - LLM客户端
 ```python
-# 职责：统一封装LLM调用，支持多种提供商
-# 使用方式：
-from infra.llm_client import call_kimi_print, clean_ai_output
-
-result = call_kimi_print(prompt, cache_key="analysis_001")
-cleaned = clean_ai_output(result)
-```
-
-**关键函数**：
-- `call_kimi_print()` - 调用Kimi CLI（带缓存）
-- `clean_ai_output()` - 清理AI输出格式
-- `ai_summarize_cached()` - 带缓存的AI总结（业务封装）
-
-#### `infra/data_utils.py` - 数据处理
-```python
-# 职责：通用数据处理，股票代码转换等
-# 使用方式：
-from infra.data_utils import convert_to_ts_code, to_number
-
-ts_code = convert_to_ts_code("000001")  # "000001.SZ"
-nums = to_number(df["pct_chg"])         # 转换为数值类型
-```
-
-**关键函数**：
-- `convert_to_ts_code()` - 转换为Tushare代码格式
-- `convert_to_ak_code()` - 转换为AKShare代码格式
-- `to_number()` - 转换Series为数值类型
-
-#### `infra/storage.py` - 文件存储
-```python
-# 职责：文件存储相关工具
-# 使用方式：
-from infra.storage import clean_filename
-
-safe_name = clean_filename("非法:文件名.txt")  # "非法_文件名.txt"
-```
-
-**关键函数**：
-- `clean_filename()` - 清理文件名中的非法字符
-
-#### `infra/web_scraper.py` - 网页爬取
-```python
-# 职责：通用网页内容爬取
-# 使用方式：
-from infra.web_scraper import scrape_with_jina_reader
-
-result = scrape_with_jina_reader(url, title="文章标题")
-```
-
-**关键函数**：
-- `scrape_with_jina_reader()` - 使用Jina Reader爬取网页
-
----
-
-### 第二层：Tools（业务原子能力层）
-
-**定位**：股票分析领域的原子能力，单一职责，可独立使用。
-
-**设计原则**：
-- 每个函数只做一件事
-- 不依赖其他业务模块（可依赖infra）
-- 提供清晰的输入输出接口
-
-#### `tools/utils.py` - 股票业务工具
-```python
-# 职责：股票业务相关的数据处理工具
-# 依赖：infra.data_utils（代码转换）
-
-from tools.utils import (
-    get_stock_list,           # 获取股票列表
-    get_xueqiu_stock_topics,  # 获取雪球话题
-    weibo_comments,           # 获取微博评论
-    filter_st_bj_stocks,      # 过滤ST和北交所
-    calc_pct_change,          # 计算百分比变化
-)
-```
-
-#### `tools/kline_data.py` - K线数据
-```python
-# 职责：K线数据获取和可视化
-# 依赖：infra.config, infra.data_utils
-# 数据源：默认使用 Tushare API（高质量、稳定）
-
-from tools.kline_data import (
-    get_tushare_price_df,     # 获取日K线（Tushare）
-    get_tushare_weekly_df,    # 获取周K线（Tushare）
-    get_tushare_monthly_df,   # 获取月K线（Tushare）
-    get_ak_price_df,          # 获取日K线（统一接口，底层使用Tushare）
-    plotK,                    # 绘制K线图
-    calculate_macd,           # 计算MACD指标
-)
-```
-
-**数据获取规范**：
-- **默认数据源**：所有股票K线数据默认使用 **Tushare API**
-- **原因**：Tushare 数据质量高、稳定性好、字段标准化
-- **Token 配置**：通过 `infra.config.get_tushare_token()` 获取
-- **备选方案**：仅在 Tushare 不可用时才考虑 AKShare 等其他数据源
-- **统一入口**：使用 `get_ak_price_df()` 作为统一接口，内部调用 Tushare
-
-#### `tools/technical_analysis.py` - 技术分析
-```python
-# 职责：技术指标计算和形态识别
-# 依赖：tools.kline_patterns
-
-from tools.technical_analysis import StockTechnical
-
-tech = StockTechnical(df)
-features = tech.get_features()           # 获取所有技术特征
-patterns = tech.recognize_pattern()      # 识别K线形态（独立方法）
-```
-
-#### `tools/kline_patterns.py` - K线形态
-```python
-# 职责：12种K线形态识别算法
-# 依赖：无（纯算法模块）
-
-from tools.kline_patterns import (
-    KLinePatternRecognizer,
-    recognize_pattern,        # 便捷函数：识别单一形态
-    recognize_all_patterns,   # 便捷函数：识别所有形态
-)
-```
-
-#### `tools/market_data.py` - 市场数据
-```python
-# 职责：大盘、板块、龙虎榜等市场数据获取
-# 依赖：infra.config, infra.data_utils
-
-from tools.market_data import (
-    get_market_data,          # 获取大盘数据
-    get_all_stocks,           # 获取所有股票
-    get_longhu_data,          # 获取龙虎榜数据
-)
-```
-
-#### `tools/financial_data.py` - 金融数据
-```python
-# 职责：汇率、债券、商品等金融数据
-# 依赖：infra.config
-
-from tools.financial_data import EconomicIndicators
-
-# 获取汇率
-rate = EconomicIndicators.get_exchangerates_daily("USD", "CNY")
-```
-
-#### `tools/crawlers.py` - 数据爬虫
-```python
-# 职责：财联社、巨潮资讯等数据源爬取
-# 依赖：infra.web_scraper, infra.storage
-
-from tools.crawlers import (
-    cls_telegraphs,           # 财联社电报
-    cninfo_announcement_spider, # 巨潮资讯公告
-)
-```
-
-#### `tools/ai_analysis.py` - AI分析原子能力
-```python
-# 职责：AI分析的Prompt构建和数据格式化（原子能力）
-# 依赖：infra.llm_client
-
-from tools.ai_analysis import (
-    build_macro_prompt,       # 构建宏观分析Prompt
-    build_market_overview_prompt,  # 构建市场概况Prompt
-    run_ai_analysis,          # 执行AI分析（原子能力）
-    display_ai_analysis,      # 显示AI分析结果
-    format_series_for_ai,     # 格式化数据序列
-)
-
-# 注意：analyze_* 业务流程已迁移到 services.ai_analysis
-```
-
----
-
-### 第三层：Services（业务流程层）
-
-**定位**：业务流程编排，组合多个原子能力完成复杂业务场景。
-
-**设计原则**：
-- 协调多个tools完成业务目标
-- 处理业务规则和流程控制
-- 可调用display方法展示结果
-
-#### `services/ai_analysis.py` - AI分析业务流程
-```python
-# 职责：AI分析的业务流程编排
-# 依赖：tools.ai_analysis（原子能力）
-
-from services.ai_analysis import (
-    analyze_external_assets,      # 外围资产分析流程
-    analyze_market_overview,      # 市场概况分析流程
-    analyze_index_technical,      # 指数技术分析流程
-    analyze_stock_classification, # 股票分类分析流程
-)
-
-# 使用示例：
-result = analyze_external_assets(
-    usdcny_series=usdcny_data,
-    btc_series=btc_data,
-    xau_series=xau_data,
-    wti_series=wti_data,
-    us10y_series=us10y_data,
-    show_ui=True  # 自动在Streamlit中展示结果
-)
-```
-
-**与 tools.ai_analysis 的区别**：
-- `tools.ai_analysis.build_macro_prompt()` - 原子能力：构建Prompt
-- `services.ai_analysis.analyze_external_assets()` - 业务流程：构建Prompt + 调用AI + 展示结果
-
----
-
-## 代码风格规范
-
-### 文件编码
-- 所有 Python 文件必须使用 UTF-8 编码
-- 文件头部必须包含：
-  ```python
-  #!/usr/bin/env python
-  # -*- coding: utf-8 -*-
-  ```
-
-### 导入顺序（强制要求）
-
-```python
-# 1. 标准库
-import os
-import sys
-from datetime import datetime, timedelta
-
-# 2. 第三方库
-import pandas as pd
-import numpy as np
-import streamlit as st
-import akshare as ak
-import tushare as ts
-
-# 3. 基础设施层（跨项目可复用）
-from infra.config import get_tushare_token
-from infra.data_utils import convert_to_ts_code
-from infra.llm_client import call_kimi_print
-
-# 4. 业务原子能力层（股票领域）
 from tools.kline_data import get_ak_price_df, plotK
-from tools.market_data import get_market_data
-from tools.ai_analysis import build_macro_prompt
-
-# 5. 业务流程层（复杂场景编排）
-from services.ai_analysis import analyze_external_assets
-```
-
-### 跨层调用规范
-
-#### ✅ 正确的调用方式
-
-```python
-# services 层调用 tools 层（业务流程组合原子能力）
-# services/ai_analysis.py
+from tools.market_data import get_market_daily_stats
 from tools.ai_analysis import build_macro_prompt, run_ai_analysis
-from tools.financial_data import EconomicIndicators
-
-def analyze_external_assets(...):
-    # 1. 获取数据（原子能力）
-    usdcny_data = EconomicIndicators.get_exchangerates_daily(...)
-    
-    # 2. 构建Prompt（原子能力）
-    prompt = build_macro_prompt(...)
-    
-    # 3. 执行分析（原子能力）
-    result = run_ai_analysis(prompt)
-    
-    # 4. 业务流程控制
-    return display_ai_analysis(...)
 ```
 
 ```python
-# tools 层调用 infra 层（业务依赖基础设施）
-# tools/kline_data.py
 from infra.config import get_tushare_token
-from infra.data_utils import convert_to_ts_code
-
-def get_tushare_price_df(code, ...):
-    ts_code = convert_to_ts_code(code)  # 基础设施
-    pro = get_tushare_pro()             # 基础设施
-    # ... 业务逻辑
+from infra.data_utils import convert_to_ts_code, calc_pct_change
+from infra.daily_basic_repository import query_daily_basic
 ```
 
-#### ❌ 错误的调用方式
+### 错误示例
 
 ```python
-# 错误：tools 调用 services（下层调用上层）
-# tools/kline_data.py
-from services.ai_analysis import analyze_external_assets  # ❌ 禁止！
-
-# 错误：infra 调用 tools（基础设施依赖业务）
-# infra/config.py
-from tools.utils import get_stock_list  # ❌ 禁止！
-
-# 错误：循环导入
-# tools/a.py
-from tools.b import func_b
-
-# tools/b.py
-from tools.a import func_a  # ❌ 循环导入！
+from tools.market_data import get_market_data  # 错误：已迁到 services
+from tools.ai_analysis import analyze_stock_classification  # 错误：已迁到 services
+from tools.daily_basic_storage import get_daily_basic_smart  # 错误：模块已删除
 ```
-
-### 函数命名规范
 
 ```python
-# 获取数据：get_*
-def get_tushare_price_df(code: str) -> pd.DataFrame:
-    """使用tushare获取股票日K线数据"""
-    pass
+import os
+import streamlit as st
 
-# 计算指标：calculate_*
-def calculate_macd(df: pd.DataFrame) -> pd.DataFrame:
-    """计算MACD指标"""
-    pass
-
-# 构建Prompt：build_*
-def build_macro_prompt(...) -> str:
-    """构建宏观分析Prompt"""
-    pass
-
-# 分析流程：analyze_*
-def analyze_external_assets(...) -> Optional[str]:
-    """外围资产分析业务流程"""
-    pass
-
-# 格式化：format_*
-def format_series_for_ai(...) -> str:
-    """格式化数据序列为AI分析文本格式"""
-    pass
-
-# 私有方法：_*
-def _get_ts_client():
-    """内部辅助函数"""
-    pass
+token = os.environ.get("TUSHARE_TOKEN")      # 错误：应走 infra.config
+token = st.secrets.get("tushare_token")      # 错误：应走 infra.config
 ```
 
-### 类型注解规范
+## 配置规范
+
+统一要求：
+
+- 所有配置读取都通过 `infra.config`
+- 代码中不直接读取：
+  - `os.environ.get(...)`
+  - `st.secrets.get(...)`
+- 新增外部数据源时，先在 `infra.config` 增加读取函数，再在 tool / service 使用
+
+## 命名规范
+
+- 获取数据：`get_*`
+- 计算指标：`calculate_*`
+- 构建 prompt：`build_*`
+- 分析流程：`analyze_*`
+- 格式化：`format_*`
+- 收集型原子工具：`collect_*` / `fetch_*`
+- 私有辅助：`_*`
+
+## 代码风格
+
+- Python 文件使用 UTF-8
+- 新文件头部统一：
 
 ```python
-from typing import Optional, List, Dict, Any
-import pandas as pd
-
-def get_stock_data(
-    ts_code: str,
-    start_date: str,
-    end_date: str,
-    count: int = 60
-) -> pd.DataFrame:
-    """
-    获取股票数据
-    
-    Args:
-        ts_code: 股票代码（支持多种格式）
-        start_date: 开始日期（YYYYMMDD）
-        end_date: 结束日期（YYYYMMDD）
-        count: 返回数据条数，默认60
-    
-    Returns:
-        pd.DataFrame: 包含open, high, low, close, volume的DataFrame
-    
-    Raises:
-        ValueError: 如果股票代码格式无效
-        RuntimeError: 如果API调用失败
-    
-    Example:
-        >>> df = get_stock_data("000001.SZ", "20240101", "20241231")
-        >>> print(df.head())
-    """
-    pass
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
 ```
 
----
+- 显式导入，禁止通配符导入
+- 补充必要类型注解
+- 错误处理显式，不静默吞异常
 
-## 错误处理规范
+## 提交与评审要求
 
-### 日志配置
-```python
-import logging
+以下改动必须走 PR：
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
-)
-logger = logging.getLogger(__name__)
-```
-
-### 异常处理模式
-```python
-# 基础设施层：抛出异常，让上层处理
-def get_tushare_token() -> str:
-    token = os.environ.get("TUSHARE_TOKEN")
-    if not token:
-        raise ValueError("TUSHARE_TOKEN not found")
-    return token
-
-# 业务原子能力层：捕获并转换为用户友好的错误
-def get_tushare_price_df(code: str) -> pd.DataFrame:
-    try:
-        pro = get_tushare_pro()
-        df = pro.daily(ts_code=code)
-        return df
-    except Exception as e:
-        logger.error(f"获取股票数据失败: {code}, error: {e}")
-        raise RuntimeError(f"无法获取 {code} 的数据，请检查代码或网络连接")
-
-# 业务流程层：捕获并提供降级方案
-def analyze_external_assets(...) -> Optional[str]:
-    try:
-        prompt = build_macro_prompt(...)
-        return run_ai_analysis(prompt)
-    except Exception as e:
-        logger.error(f"AI分析失败: {e}")
-        if show_ui:
-            st.error("AI分析暂时不可用，请稍后重试")
-        return None
-```
-
----
-
-## Git 工作流
-
-### Git 操作规范
-
-#### 1. 频繁提交原则
-
-**每次操作都必须 commit**：
-- ✅ 完成一个功能点 → commit
-- ✅ 修复一个 bug → commit  
-- ✅ 重构一个模块 → commit
-- ✅ 更新文档 → commit
-
-**Push 规则**：
-- ❌ **禁止自动 push**：不要每次 commit 后都自动 push
-- ✅ **Code Review 后 push**：仅在代码审查通过后，接到明确指令才 push
-- ✅ **功能完成时 push**：一个完整功能开发完成并通过审查后 push
-- ✅ **下班前 push**：每天下班前，确保当日工作已 commit 并通过审查后 push
-
-```bash
-# 示例工作流程
-git add .
-git commit -m "feat(tools): 新增K线形态识别功能"
-# ... 继续开发 ...
-git add .
-git commit -m "fix(tools): 修复锤子线识别逻辑"
-# 等待 Code Review 通过...
-# 接到指令后 push
-git push
-```
-
-#### 2. 分支管理策略
-
-**简单修改**（单文件、小于100行）：
-- 直接在 `master` 分支操作
-- 及时 commit
-- 接到指令后 push
-
-**较大改动**（多文件重构、新功能模块）：
-- 必须创建 feature 分支
-- 走 PR（Pull Request）流程
-
-```bash
-# 创建功能分支
-git checkout -b feature/kline-patterns
-
-# 开发完成后，push分支
-git push -u origin feature/kline-patterns
-
-# 在 GitHub 上创建 Pull Request
-# 代码审查通过后合并到 master
-```
-
-**需要走 PR 流程的场景**：
-- 新增/删除整个模块（infra/tools/services）
+- 新增 / 删除整个模块
+- 调整跨层依赖关系
 - 修改超过 5 个文件
-- 改动超过 300 行代码
-- 涉及 API 接口变更
-- 数据库/配置结构变更
-- 跨层调用关系调整
+- 大于 300 行的结构性改动
+- repository / config / service 边界调整
 
-#### 3. 提交前检查清单
+提交信息格式：
 
-```bash
-# 1. 检查修改内容
-git diff --cached
-
-# 2. 确认没有遗漏的文件
-git status
-
-# 3. 运行代码检查（如有）
-# python -m pytest tests/
-# python -m mypy tools/
-
-# 4. 提交
-git commit -m "type(scope): subject"
+```text
+<type>(<scope>): <subject>
 ```
 
-#### 4. PR 流程规范
+示例：
 
-**创建 PR 前**：
-1. 确保分支基于最新的 master
-2. 本地测试通过
-3. 添加清晰的 PR 描述（做了什么、为什么、如何测试）
-
-**PR 审查要点**：
-- 代码是否符合架构规范
-- 是否有重复代码
-- 错误处理是否完善
-- 文档是否同步更新
-
-**合并后**：
-1. 删除 feature 分支
-2. 更新本地 master
-
-### Commit 消息规范
-```bash
-# 格式：<type>(<scope>): <subject>
-# scope: infra | tools | services | pages | docs
-
-# 示例：
-git commit -m "feat(infra): 新增 Jina Reader 网页爬取功能"
-git commit -m "fix(tools): 修复巨潮资讯爬虫超时问题"
-git commit -m "refactor(services): 优化AI分析业务流程"
-git commit -m "docs: 更新架构规范文档"
-```
-
-### Commit 类型
-- `feat`: 新功能
-- `fix`: Bug 修复
-- `refactor`: 重构（不改变功能）
-- `perf`: 性能优化
-- `docs`: 文档更新
-- `style`: 代码风格调整
-- `test`: 测试相关
-- `chore`: 构建系统或依赖变更
-
----
+- `refactor(tools): remove composite market flows from tools`
+- `feat(services): add stock universe orchestration service`
+- `docs: refresh architecture guide after layering refactor`
 
 ## 维护信息
 
-**维护者：** chenh
-
-**架构版本：** v3.0 - 三层架构重构版
-
-**最后更新：** 2026-03-26
-
----
-
-## 相关链接
-
-- Tushare API: https://tushare.pro/document/2
-- AkShare 文档: https://akshare.akfamily.xyz/
-- Streamlit 文档: https://docs.streamlit.io/
+- 维护者：`chenh`
+- 架构版本：`v3.1`
+- 最后更新：`2026-03-29`

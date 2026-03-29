@@ -1,30 +1,16 @@
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
 """
-通用数据处理模块
-包含数据转换、格式化等基础设施
+通用数据处理模块。
 """
 
 from typing import Any, Optional, Union
+
 import pandas as pd
 
 
 def convert_to_ts_code(code: Optional[str]) -> str:
-    """
-    将多种股票代码格式转换为 Tushare ts_code 格式 (xxxxxx.SH/SZ/BJ)
-
-    支持的输入格式：
-    - 纯数字: 000001, 600000
-    - 带前缀: sz000001, sh600000, SZ000001, SH600000
-    - ts_code: 000001.SZ, 600000.SH
-
-    Args:
-        code: 股票代码
-
-    Returns:
-        str: 标准 ts_code 格式
-
-    Raises:
-        ValueError: 如果 code 为 None 或空字符串
-    """
+    """将股票代码转换为 Tushare ts_code 格式。"""
     if code is None:
         raise ValueError("股票代码不能为空")
 
@@ -33,78 +19,110 @@ def convert_to_ts_code(code: Optional[str]) -> str:
         raise ValueError("股票代码不能为空")
 
     upper_code = code.upper()
-
-    # 已经是 ts_code 格式
     if "." in upper_code:
         prefix, suffix = upper_code.split(".", 1)
-        suffix = suffix.replace("SS", "SH")  # 兼容 SS 后缀
+        suffix = suffix.replace("SS", "SH")
         if suffix in {"SH", "SZ", "BJ"}:
             return f"{prefix}.{suffix}"
 
-    # 带前缀格式 (szxxxxxx, shxxxxxx, bjxxxxxx)
     if upper_code.startswith(("SZ", "SH", "BJ")) and len(upper_code) >= 8:
         body = upper_code[2:]
         suffix = upper_code[:2]
         return f"{body}.{suffix}"
 
-    # 纯数字格式
     if len(code) == 6 and code.isdigit():
         if code.startswith(("0", "3")):
             return f"{code}.SZ"
-        elif code.startswith(("6", "9")):
+        if code.startswith(("6", "9")):
             return f"{code}.SH"
-        elif code.startswith("8"):
+        if code.startswith("8"):
             return f"{code}.BJ"
 
-    # 无法识别的格式，原样返回
     return upper_code
 
 
 def convert_to_ak_code(code: str) -> str:
-    """
-    将股票代码转换为 AKShare 格式 (shxxxxxx/szxxxxxx/bjxxxxxx)
-
-    Args:
-        code: 股票代码
-
-    Returns:
-        str: AKShare 格式代码
-    """
+    """将股票代码转换为 AKShare 格式。"""
     code = str(code).strip()
-
-    # 已经是 ak_code 格式
     if code.lower().startswith(("sh", "sz", "bj")) and len(code) >= 8:
         return code.lower()
 
-    # ts_code 格式
     if "." in code:
         parts = code.split(".")
         if len(parts) == 2 and parts[1].upper() in ("SH", "SZ", "BJ"):
             return f"{parts[1].lower()}{parts[0]}"
 
-    # 纯数字格式
     if len(code) == 6 and code.isdigit():
         if code.startswith(("0", "3")):
             return f"sz{code}"
-        elif code.startswith(("6", "9")):
+        if code.startswith(("6", "9")):
             return f"sh{code}"
-        elif code.startswith("8"):
+        if code.startswith("8"):
             return f"bj{code}"
 
     return code.lower()
 
 
 def to_number(series: Union[pd.Series, Any]) -> Optional[pd.Series]:
-    """
-    将 Series 转换为数值类型，移除百分号
-
-    Args:
-        series: 输入数据
-
-    Returns:
-        Optional[pd.Series]: 数值 Series，如果输入为 None 则返回 None
-    """
+    """将 Series 转为数值类型。"""
     if series is None:
         return None
     s = series.astype(str).str.replace("%", "", regex=False)
     return pd.to_numeric(s, errors="coerce")
+
+
+def latest_metric_from_df(
+    df: pd.DataFrame, value_col: str, date_col: str = "date"
+) -> Optional[dict]:
+    """从 DataFrame 中获取最新值与前值。"""
+    if df is None or df.empty or value_col not in df.columns:
+        return None
+
+    view = df.copy()
+    if date_col in view.columns:
+        view[date_col] = pd.to_datetime(view[date_col], errors="coerce")
+    view[value_col] = pd.to_numeric(view[value_col], errors="coerce")
+    view = view.dropna(subset=[value_col])
+    if date_col in view.columns:
+        view = view.dropna(subset=[date_col]).sort_values(date_col, ascending=False)
+    if view.empty:
+        return None
+
+    latest = view.iloc[0]
+    prev_value = view.iloc[1][value_col] if len(view) > 1 else None
+    return {
+        "date": latest[date_col] if date_col in view.columns else None,
+        "value": float(latest[value_col]),
+        "prev_value": float(prev_value)
+        if prev_value is not None and not pd.isna(prev_value)
+        else None,
+    }
+
+
+def calc_pct_change(current: float, previous: float) -> Optional[float]:
+    """计算百分比变化。"""
+    if current is None or previous is None or previous == 0:
+        return None
+    return (current / previous - 1) * 100
+
+
+def series_from_df(df: pd.DataFrame, value_col: str, days: int) -> list:
+    """从 DataFrame 提取时间序列。"""
+    if df is None or df.empty or value_col not in df.columns:
+        return []
+
+    view = df.copy()
+    if "date" in view.columns:
+        view["date"] = pd.to_datetime(view["date"], errors="coerce")
+    view[value_col] = pd.to_numeric(view[value_col], errors="coerce")
+    view = view.dropna(subset=[value_col])
+    if "date" in view.columns:
+        view = view.dropna(subset=["date"]).sort_values("date")
+    if view.empty:
+        return []
+
+    view = view.tail(int(days))
+    if "date" in view.columns:
+        view["date"] = view["date"].dt.strftime("%Y-%m-%d")
+    view = view[["date", value_col]].rename(columns={value_col: "value"})
+    return view.to_dict(orient="records")

@@ -7,30 +7,10 @@ import logging
 import os
 import requests
 from datetime import datetime
+from infra.config import get_jina_api_key
 from infra.storage import clean_filename
 
 logger = logging.getLogger(__name__)
-
-
-def _get_jina_api_key() -> str:
-    """获取 Jina API Key"""
-    import streamlit as st
-    import os
-
-    # 1. 尝试环境变量
-    key = os.environ.get("JINA_API_KEY", "").strip()
-    if key:
-        return key
-
-    # 2. 尝试 Streamlit secrets
-    try:
-        key = st.secrets.get("jina_api_key", "")
-        if key:
-            return key
-    except Exception:
-        pass
-
-    return ""
 
 
 def scrape_with_jina_reader(
@@ -59,7 +39,7 @@ def scrape_with_jina_reader(
         jina_url = f"https://r.jina.ai/{url}"
 
         # 获取 API Key
-        jina_api_key = _get_jina_api_key()
+        jina_api_key = get_jina_api_key()
         if not jina_api_key:
             result = {
                 "success": False,

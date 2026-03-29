@@ -5,6 +5,7 @@ import pandas as pd
 import akshare as ak
 import streamlit as st
 import tushare as ts
+from infra.config import get_tushare_token
 from tools.kline_data import get_ak_price_df
 
 
@@ -313,7 +314,7 @@ def get_zt_pool(date):
         df = None
     # fallback: Tushare limit_list
     try:
-        token = st.secrets.get("tushare_token") or os.environ.get("TUSHARE_TOKEN")
+        token = get_tushare_token()
         if not token:
             return pd.DataFrame()
         pro = ts.pro_api(token)
@@ -347,7 +348,7 @@ def get_dt_pool(date):
         df = None
     # fallback: Tushare limit_list (跌停)
     try:
-        token = st.secrets.get("tushare_token") or os.environ.get("TUSHARE_TOKEN")
+        token = get_tushare_token()
         if not token:
             return pd.DataFrame()
         pro = ts.pro_api(token)

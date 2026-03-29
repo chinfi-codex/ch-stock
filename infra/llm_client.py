@@ -9,55 +9,12 @@ import subprocess
 import hashlib
 import streamlit as st
 import openai
+from infra.config import get_llm_api_key
 
 
 def _get_api_key(provider: str) -> str:
-    """
-    获取LLM提供商的API密钥
-    优先级：环境变量 > Streamlit secrets
-
-    Args:
-        provider: 提供商名称 (doubao, siliconflow, kimi)
-
-    Returns:
-        str: API密钥
-
-    Raises:
-        ValueError: 如果未找到对应提供商的API密钥
-    """
-    env_var_map = {
-        "doubao": "DOUBAO_API_KEY",
-        "siliconflow": "SILICONFLOW_API_KEY",
-        "kimi": "KIMI_API_KEY",
-    }
-
-    secret_key_map = {
-        "doubao": "doubao_api_key",
-        "siliconflow": "siliconflow_api_key",
-        "kimi": "kimi_api_key",
-    }
-
-    if provider not in env_var_map:
-        raise ValueError(f"不支持的LLM提供商: {provider}")
-
-    # 1. 尝试从环境变量获取
-    api_key = os.environ.get(env_var_map[provider], "").strip()
-    if api_key:
-        return api_key
-
-    # 2. 尝试从 Streamlit secrets 获取
-    try:
-        api_key = st.secrets.get(secret_key_map[provider], "")
-        if api_key:
-            return api_key
-    except Exception:
-        pass
-
-    raise ValueError(
-        f"未找到 {provider} 的API密钥。"
-        f"请设置环境变量 {env_var_map[provider]} "
-        f"或在 .streamlit/secrets.toml 中配置 {secret_key_map[provider]}"
-    )
+    """????????? LLM API Key?"""
+    return get_llm_api_key(provider)
 
 
 def _create_completion(api_key, base_url, model_id, sys_msg, query):
