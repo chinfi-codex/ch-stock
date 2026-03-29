@@ -540,7 +540,7 @@ def display_review_data(review_data, show_modules=None):
                     )
                     df_history = df_history.dropna(subset=["日期"])
                     df_history = df_history.sort_values("日期")
-                    df_history = df_history.tail(100)
+                    df_history = df_history.tail(90)
                     numeric_cols = ["上涨", "下跌", "涨停", "跌停", "活跃度", "成交额"]
                     for col in numeric_cols:
                         if col in df_history.columns:
@@ -570,7 +570,7 @@ def display_review_data(review_data, show_modules=None):
                     with first_row[0]:
                         if "成交额" in df_history.columns:
                             amount_df = (
-                                df_history.dropna(subset=["成交额"]).tail(100).copy()
+                                df_history.dropna(subset=["成交额"]).tail(90).copy()
                             )
                             if amount_df.empty:
                                 st.info("暂无成交额数据")
@@ -604,7 +604,7 @@ def display_review_data(review_data, show_modules=None):
                     with first_row[1]:
                         if "活跃度" in df_history.columns:
                             activity_df = (
-                                df_history.dropna(subset=["活跃度"]).tail(100).copy()
+                                df_history.dropna(subset=["活跃度"]).tail(90).copy()
                             )
                             if activity_df.empty:
                                 st.info("暂无活跃度数据")
@@ -676,7 +676,7 @@ def display_review_data(review_data, show_modules=None):
                                 df_history[
                                     df_history[["上涨", "下跌"]].notna().any(axis=1)
                                 ]
-                                .tail(100)
+                                .tail(90)
                                 .copy()
                             )
                             if up_down_df.empty:
@@ -732,7 +732,7 @@ def display_review_data(review_data, show_modules=None):
                                 df_history[
                                     df_history[["涨停", "跌停"]].notna().any(axis=1)
                                 ]
-                                .tail(100)
+                                .tail(90)
                                 .copy()
                             )
                             if limit_df.empty:

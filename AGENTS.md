@@ -338,6 +338,13 @@ token = st.secrets.get("tushare_token")      # 错误：应走 infra.config
 - `feat(services): add stock universe orchestration service`
 - `docs: refresh architecture guide after layering refactor`
 
+## 根目录清洁要求
+
+- 项目根目录禁止保留临时文件、分析草稿、一次性脚本和测试文件
+- 临时分析文件例如 `analysis_tmp.py` 必须在使用后删除，不得留在根目录
+- 测试代码不得放在项目根目录；统一放入 `tests/` 或对应模块目录下
+- Python 运行产生的缓存目录如 `__pycache__/` 不得提交，发现后应及时清理
+
 ## 维护信息
 
 - 维护者：`chenh`

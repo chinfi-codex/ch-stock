@@ -4,6 +4,7 @@
 股票池业务服务。
 """
 
+import logging
 from datetime import date, datetime
 
 import pandas as pd
@@ -15,38 +16,92 @@ from infra.data_utils import to_number
 from services.daily_basic_service import get_daily_basic_smart
 
 
-@st.cache_data(ttl="1d")
-def get_all_stocks(base_date=None):
-    """获取指定交易日的股票列表。"""
+logger = logging.getLogger(__name__)
+
+
+def _normalize_base_date(base_date) -> date | None:
     if base_date is None:
-        base_date = datetime.now().date()
+        return datetime.now().date()
     if isinstance(base_date, datetime):
-        base_date = base_date.date()
-    elif isinstance(base_date, str):
+        return base_date.date()
+    if isinstance(base_date, str):
         for fmt in ("%Y%m%d", "%Y-%m-%d"):
             try:
-                base_date = datetime.strptime(base_date, fmt).date()
-                break
+                return datetime.strptime(base_date, fmt).date()
             except ValueError:
                 continue
+        return None
+    if isinstance(base_date, date):
+        return base_date
+    return None
 
-    if not isinstance(base_date, date):
-        return pd.DataFrame()
+
+def _resolve_trade_date(pro, base_date: date) -> str:
     trade_date = base_date.strftime("%Y%m%d")
-    token = get_tushare_token()
-    if not token or not trade_date:
+    month_start = base_date.replace(day=1).strftime("%Y%m%d")
+
+    try:
+        trade_cal = pro.trade_cal(
+            exchange="SSE",
+            start_date=month_start,
+            end_date=trade_date,
+            fields="cal_date,is_open",
+        )
+    except Exception as exc:
+        logger.warning("获取交易日历失败，直接使用输入日期 %s: %s", trade_date, exc)
+        return trade_date
+
+    if trade_cal is None or trade_cal.empty:
+        return trade_date
+
+    open_days = trade_cal.loc[trade_cal["is_open"] == 1, "cal_date"].tolist()
+    if not open_days:
+        return trade_date
+
+    return str(open_days[-1])
+
+
+@st.cache_data(ttl="1d")
+def get_all_stocks(base_date=None):
+    """获取指定日期对应最近交易日的股票列表。"""
+    normalized_date = _normalize_base_date(base_date)
+    if normalized_date is None:
         return pd.DataFrame()
 
-    pro = ts.pro_api(token)
+    token = get_tushare_token()
+    if not token:
+        return pd.DataFrame()
+
+    try:
+        pro = ts.pro_api(token)
+        trade_date = _resolve_trade_date(pro, normalized_date)
+    except Exception as exc:
+        logger.error("初始化 Tushare 客户端失败: %s", exc)
+        return pd.DataFrame()
+
     daily_basic = get_daily_basic_smart(trade_date=trade_date, use_cache=True)
-    daily = pro.daily(trade_date=trade_date, fields="ts_code,trade_date,pct_chg,amount")
+    try:
+        daily = pro.daily(
+            trade_date=trade_date, fields="ts_code,trade_date,pct_chg,amount"
+        )
+    except Exception as exc:
+        logger.error("获取日线行情失败: trade_date=%s, error=%s", trade_date, exc)
+        return pd.DataFrame()
+
     if daily_basic is None or daily_basic.empty or daily is None or daily.empty:
         return pd.DataFrame()
 
     merged = daily_basic.merge(daily, on=["ts_code", "trade_date"], how="left")
-    stock_basic = pro.stock_basic(list_status="L", fields="ts_code,name")
+
+    try:
+        stock_basic = pro.stock_basic(list_status="L", fields="ts_code,name")
+    except Exception as exc:
+        logger.warning("获取股票基础信息失败: %s", exc)
+        stock_basic = pd.DataFrame()
+
     if stock_basic is not None and not stock_basic.empty:
         merged = merged.merge(stock_basic, on="ts_code", how="left")
+
     merged["code"] = merged["ts_code"].str.split(".").str[0]
     merged = merged.rename(
         columns={"pct_chg": "pct", "amount": "amount", "total_mv": "mkt_cap"}
