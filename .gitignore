@@ -26,7 +26,7 @@ build/
 .env
 .env.local
 .secrets/
-.streamlit/secrets.toml
+.streamlit/
 
 # Data files
 datas/reviews/*.json
