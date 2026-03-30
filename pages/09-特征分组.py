@@ -19,6 +19,12 @@ from tools import plotK
 from tools.kline_data import get_ak_price_df
 from services.ai_analysis import analyze_stock_classification
 from services.daily_basic_service import get_daily_basic_smart
+from services.watchlist_service import (
+    add_stock_to_watchlist,
+    get_watchlist,
+    init_watchlist_state,
+    is_watched,
+)
 
 
 def _section_title(title):
@@ -26,6 +32,12 @@ def _section_title(title):
         f"<div style='font-size:26px;font-weight:700;margin:8px 0 8px 0;'>{title}</div>",
         unsafe_allow_html=True,
     )
+
+
+FEATURE_GROUP_SOURCE_MAP = {
+    "capacity": "??????",
+    "zt": "10:30?????",
+}
 
 
 @st.cache_data(ttl="10m")
@@ -313,112 +325,6 @@ def get_capacity_stocks():
 # ========== 关注列表管理 ==========
 
 # 关注列表数据文件路径
-WATCHLIST_FILE = "datas/watchlist.json"
-
-
-def _init_watchlist_state():
-    """初始化关注列表到 session_state"""
-    if "watchlist_data" not in st.session_state:
-        if not os.path.exists(WATCHLIST_FILE):
-            st.session_state.watchlist_data = {"watchlist": []}
-        else:
-            try:
-                with open(WATCHLIST_FILE, "r", encoding="utf-8") as f:
-                    st.session_state.watchlist_data = json.load(f)
-            except Exception as e:
-                st.session_state.watchlist_data = {"watchlist": []}
-
-
-def get_watchlist():
-    """
-    获取关注列表（从 session_state）
-
-    Returns:
-        dict: 包含 watchlist 列表的字典
-    """
-    _init_watchlist_state()
-    return st.session_state.watchlist_data
-
-
-def save_watchlist(watchlist_data):
-    """
-    保存关注列表到文件和 session_state
-
-    Args:
-        watchlist_data: 包含 watchlist 列表的字典
-
-    Returns:
-        bool: 保存是否成功
-    """
-    try:
-        os.makedirs("datas", exist_ok=True)
-        with open(WATCHLIST_FILE, "w", encoding="utf-8") as f:
-            json.dump(watchlist_data, f, ensure_ascii=False, indent=2)
-        # 同时更新 session_state
-        st.session_state.watchlist_data = watchlist_data
-        return True
-    except Exception as e:
-        st.error(f"保存关注列表失败: {e}")
-        return False
-
-
-def add_stock_to_watchlist(code, name):
-    """
-    添加股票到关注列表
-
-    Args:
-        code: 股票代码
-        name: 股票名称
-
-    Returns:
-        tuple: (bool, str) - 是否成功，消息
-    """
-    _init_watchlist_state()
-    watchlist_data = get_watchlist()
-
-    if "watchlist" not in watchlist_data:
-        watchlist_data["watchlist"] = []
-
-    # 检查是否已存在
-    watched_codes = [item.get("code") for item in watchlist_data["watchlist"]]
-    if code in watched_codes:
-        return False, "已关注"
-
-    # 添加新股票
-    watchlist_data["watchlist"].append(
-        {
-            "code": code,
-            "name": name,
-            "add_time": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-        }
-    )
-
-    if save_watchlist(watchlist_data):
-        return True, "关注成功"
-    return False, "保存失败"
-
-
-def is_watched(code, watchlist_data=None):
-    """
-    检查股票是否已关注
-
-    Args:
-        code: 股票代码
-        watchlist_data: 关注列表数据（可选）
-
-    Returns:
-        bool: 是否已关注
-    """
-    if watchlist_data is None:
-        watchlist_data = get_watchlist()
-
-    if "watchlist" not in watchlist_data:
-        return False
-
-    watched_codes = [item.get("code") for item in watchlist_data["watchlist"]]
-    return code in watched_codes
-
-
 @st.fragment
 def stock_card_with_watch(stock, stock_type="capacity"):
     """
@@ -454,7 +360,7 @@ def stock_card_with_watch(stock, stock_type="capacity"):
             if st.button(
                 "⭐ 关注", key=f"watch_{stock_type}_{code}", use_container_width=True
             ):
-                success, msg = add_stock_to_watchlist(code, name)
+                success, msg = add_stock_to_watchlist(code, name, source_group)
                 if success:
                     st.toast(f"{name} {msg}", icon="✅")
                 else:
@@ -493,7 +399,7 @@ def main():
     st.set_page_config(page_title="特征分组", page_icon="📊", layout="wide")
 
     # 初始化关注列表
-    _init_watchlist_state()
+    init_watchlist_state()
 
     _section_title("📊 特征分组")
 
