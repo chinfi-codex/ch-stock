@@ -5,20 +5,18 @@
 展示容量上涨股票和10:30前涨停股票
 """
 
-import os
 import json
 import datetime
-import time
-
 import streamlit as st
 import pandas as pd
 import requests
 
 from infra.config import get_tushare_token
 from tools import plotK
-from tools.kline_data import get_ak_price_df
+from tools.kline_data import get_tushare_price_df
 from services.ai_analysis import analyze_stock_classification
 from services.daily_basic_service import get_daily_basic_smart
+from services.technical_feature_service import get_box_breakout_badge
 from services.watchlist_service import (
     add_stock_to_watchlist,
     get_watchlist,
@@ -34,9 +32,43 @@ def _section_title(title):
     )
 
 
+def _render_pattern_badge(label: str) -> None:
+    badge_style = {
+        "低位箱体突破": {
+            "background": "#e8f5e9",
+            "color": "#1b5e20",
+            "border": "#a5d6a7",
+        },
+        "高位箱体突破": {
+            "background": "#fff3e0",
+            "color": "#e65100",
+            "border": "#ffcc80",
+        },
+    }
+    style = badge_style.get(
+        label,
+        {
+            "background": "#f5f5f5",
+            "color": "#424242",
+            "border": "#e0e0e0",
+        },
+    )
+    st.markdown(
+        (
+            "<div style='margin:8px 0 6px 0;'>"
+            f"<span style='display:inline-block;padding:4px 10px;border-radius:999px;"
+            f"font-size:12px;font-weight:700;background:{style['background']};"
+            f"color:{style['color']};border:1px solid {style['border']};'>"
+            f"{label}"
+            "</span></div>"
+        ),
+        unsafe_allow_html=True,
+    )
+
+
 FEATURE_GROUP_SOURCE_MAP = {
-    "capacity": "??????",
-    "zt": "10:30?????",
+    "capacity": "容量上涨股票",
+    "zt": "10:30前涨停股票",
 }
 
 
@@ -322,9 +354,6 @@ def get_capacity_stocks():
         return []
 
 
-# ========== 关注列表管理 ==========
-
-# 关注列表数据文件路径
 @st.fragment
 def stock_card_with_watch(stock, stock_type="capacity"):
     """
@@ -336,6 +365,7 @@ def stock_card_with_watch(stock, stock_type="capacity"):
     """
     code = stock.get("code", "")
     name = stock.get("name", "")
+    source_group = FEATURE_GROUP_SOURCE_MAP.get(stock_type, "未知来源")
 
     # 判断是否已关注
     watchlist_data = get_watchlist()
@@ -355,6 +385,18 @@ def stock_card_with_watch(stock, stock_type="capacity"):
 
         st.markdown(title)
 
+        price_df = None
+        price_error = None
+        pattern_badge = {"label": None}
+        try:
+            price_df = get_tushare_price_df(code, count=180)
+            pattern_badge = get_box_breakout_badge(price_df)
+        except Exception as e:
+            price_error = e
+
+        if pattern_badge.get("label"):
+            _render_pattern_badge(pattern_badge["label"])
+
         # 关注按钮行
         if not watched:
             if st.button(
@@ -363,9 +405,11 @@ def stock_card_with_watch(stock, stock_type="capacity"):
                 success, msg = add_stock_to_watchlist(code, name, source_group)
                 if success:
                     st.toast(f"{name} {msg}", icon="✅")
+                    st.rerun(scope="fragment")
                 else:
                     st.toast(f"{name} {msg}", icon="⚠️")
-                st.rerun(scope="fragment")
+                    if msg == "已关注":
+                        st.rerun(scope="fragment")
         else:
             st.button(
                 "✅ 已关注",
@@ -375,21 +419,24 @@ def stock_card_with_watch(stock, stock_type="capacity"):
             )
 
         # K 线图
+        if price_error is not None:
+            st.warning(f"{name} 获取 K 线失败: {price_error}")
+            return
+
+        if price_df is None or price_df.empty:
+            st.warning(f"{name} 无 K 线数据")
+            return
+
         try:
-            time.sleep(0.3)  # 300ms 延时
-            price_df = get_ak_price_df(code, count=60)
-            if price_df is not None and not price_df.empty:
-                plotK(
-                    price_df,
-                    k="d",
-                    plot_type="candle",
-                    ma_line=(5, 10, 20),
-                    container=st,
-                )
-            else:
-                st.warning(f"{name} 无 K 线数据")
+            plotK(
+                price_df.tail(60),
+                k="d",
+                plot_type="candle",
+                ma_line=(5, 10, 20),
+                container=st,
+            )
         except Exception as e:
-            st.warning(f"{name} 获取 K 线失败")
+            st.warning(f"{name} K 线绘制失败: {e}")
 
 
 # ========== 页面主函数 ==========

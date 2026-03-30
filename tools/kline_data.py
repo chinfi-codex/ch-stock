@@ -29,22 +29,35 @@ TS_TOKEN = get_tushare_token()
 _ts_pro_client = None
 
 
+def _normalize_end_date(end_date):
+    if end_date is None:
+        return datetime.datetime.now().strftime("%Y%m%d")
+
+    if isinstance(end_date, (datetime.date, datetime.datetime)):
+        return end_date.strftime("%Y%m%d")
+
+    normalized = str(end_date).strip().replace("-", "")
+    if len(normalized) != 8 or not normalized.isdigit():
+        raise ValueError(f"不支持的日期格式: {end_date}")
+    return normalized
+
+
 def _get_ts_client():
     """惰性初始化tushare客户端"""
     global _ts_pro_client
     if _ts_pro_client is None:
-        if not TS_TOKEN:
+        token = get_tushare_token() or TS_TOKEN
+        if not token:
             raise ValueError("未配置 Tushare Token，无法使用兜底数据源")
-        ts.set_token(TS_TOKEN)
-        _ts_pro_client = ts.pro_api()
+        ts.set_token(token)
+        _ts_pro_client = ts.pro_api(token=token)
     return _ts_pro_client
 
 
 @st.cache_data(ttl="0.5d")
 def get_tushare_price_df(code, end_date=None, count=60):
     """使用tushare获取股票日K线数据"""
-    if end_date is None:
-        end_date = datetime.datetime.now().strftime("%Y%m%d")
+    end_date = _normalize_end_date(end_date)
 
     ts_code = convert_to_ts_code(code)
     pro = _get_ts_client()
@@ -71,22 +84,15 @@ def get_tushare_price_df(code, end_date=None, count=60):
 
 @st.cache_data(ttl="0.5d")
 def get_ak_price_df(code, end_date=None, count=60):
-    """获取股票日K线数据，统一使用 TuShare 数据源"""
-    if end_date is None:
-        end_date = datetime.datetime.now().strftime("%Y%m%d")
-
-    try:
-        return get_tushare_price_df(code, end_date, count)
-    except Exception as ts_error:
-        logger.error(f"tushare获取 {code} 日线失败: {ts_error}")
-        raise
+    """兼容旧调用名，内部统一转到 Tushare 日线接口"""
+    end_date = _normalize_end_date(end_date)
+    return get_tushare_price_df(code, end_date, count)
 
 
 @st.cache_data(ttl="0.5d")
 def get_tushare_weekly_df(code, end_date=None, count=60):
     """使用tushare获取股票周K线数据"""
-    if end_date is None:
-        end_date = datetime.datetime.now().strftime("%Y%m%d")
+    end_date = _normalize_end_date(end_date)
 
     ts_code = convert_to_ts_code(code)
     pro = _get_ts_client()
@@ -115,8 +121,7 @@ def get_tushare_weekly_df(code, end_date=None, count=60):
 @st.cache_data(ttl="0.5d")
 def get_tushare_monthly_df(code, end_date=None, count=60):
     """使用tushare获取股票月K线数据"""
-    if end_date is None:
-        end_date = datetime.datetime.now().strftime("%Y%m%d")
+    end_date = _normalize_end_date(end_date)
 
     ts_code = convert_to_ts_code(code)
     pro = _get_ts_client()
@@ -145,8 +150,7 @@ def get_tushare_monthly_df(code, end_date=None, count=60):
 @st.cache_data(ttl="0.5d")
 def get_ak_interval_price_df(code, end_date=None, count=241):
     """获取股票分时数据（带重试机制）"""
-    if end_date is None:
-        end_date = datetime.datetime.now().strftime("%Y%m%d")
+    end_date = _normalize_end_date(end_date)
 
     df = ak.stock_zh_a_hist_min_em(symbol=code, end_date=end_date, period="1").tail(
         count

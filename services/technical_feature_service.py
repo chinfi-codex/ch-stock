@@ -4,7 +4,16 @@
 技术特征编排服务。
 """
 
+from __future__ import annotations
+
 import pandas as pd
+
+from tools.technical_analysis import StockTechnical
+
+
+BOX_BREAKOUT_LOOKBACK_DAYS = 120
+LOW_BREAKOUT_POSITION_THRESHOLD = 0.4
+HIGH_BREAKOUT_POSITION_THRESHOLD = 0.7
 
 
 def get_features(
@@ -125,3 +134,78 @@ def get_features(
     if technical.multi_stock and stock_id:
         return result_df.xs(stock_id, level=1)
     return result_df
+
+
+def _prepare_box_breakout_input(price_df: pd.DataFrame) -> pd.DataFrame:
+    technical_df = price_df.copy()
+
+    if "turnover" not in technical_df.columns:
+        technical_df["turnover"] = 0.0
+
+    return technical_df
+
+
+def _calculate_price_position_score(
+    price_df: pd.DataFrame, lookback_days: int = BOX_BREAKOUT_LOOKBACK_DAYS
+) -> float | None:
+    if price_df is None or price_df.empty:
+        return None
+
+    recent_df = price_df.tail(lookback_days)
+    if recent_df.empty:
+        return None
+
+    range_high = recent_df["high"].max()
+    range_low = recent_df["low"].min()
+    latest_close = recent_df["close"].iloc[-1]
+
+    if pd.isna(range_high) or pd.isna(range_low) or pd.isna(latest_close):
+        return None
+    if range_high <= range_low:
+        return None
+
+    return float((latest_close - range_low) / (range_high - range_low))
+
+
+def get_box_breakout_badge(price_df: pd.DataFrame) -> dict[str, object]:
+    """
+    基于日线数据识别箱体突破标签，供页面做轻量展示。
+    """
+    if price_df is None or price_df.empty:
+        return {"label": None, "position_score": None, "breakout_strength": None}
+
+    technical = StockTechnical(_prepare_box_breakout_input(price_df))
+    feature_df = get_features(
+        technical,
+        include_new_high=False,
+        include_sentiment=False,
+        include_box_breakout=True,
+    )
+
+    if feature_df.empty:
+        return {"label": None, "position_score": None, "breakout_strength": None}
+
+    latest = feature_df.iloc[-1]
+    breakout_value = latest.get("Breakout_up", False)
+    is_breakout = False if pd.isna(breakout_value) else bool(breakout_value)
+    breakout_strength = latest.get("Breakout_strength")
+    position_score = _calculate_price_position_score(price_df)
+
+    if not is_breakout or position_score is None:
+        return {
+            "label": None,
+            "position_score": position_score,
+            "breakout_strength": breakout_strength,
+        }
+
+    label = None
+    if position_score <= LOW_BREAKOUT_POSITION_THRESHOLD:
+        label = "低位箱体突破"
+    elif position_score >= HIGH_BREAKOUT_POSITION_THRESHOLD:
+        label = "高位箱体突破"
+
+    return {
+        "label": label,
+        "position_score": position_score,
+        "breakout_strength": breakout_strength,
+    }

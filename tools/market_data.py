@@ -4,6 +4,8 @@
 市场数据原子能力。
 """
 
+import logging
+
 import pandas as pd
 import streamlit as st
 import akshare as ak
@@ -12,11 +14,14 @@ import tushare as ts
 from infra.config import get_tushare_token
 
 
-@st.cache_data(ttl="1h")
-def get_financing_net_buy_series(days: int = 60) -> pd.DataFrame:
+logger = logging.getLogger(__name__)
+
+
+def _fetch_financing_net_buy_series(days: int) -> pd.DataFrame:
     """按日期汇总近 N 个交易日融资净买入。"""
     token = get_tushare_token()
     if not token:
+        logger.warning("获取融资净买入失败：未配置 Tushare token")
         return pd.DataFrame()
     pro = ts.pro_api(token)
     end = pd.Timestamp.now()
@@ -25,9 +30,15 @@ def get_financing_net_buy_series(days: int = 60) -> pd.DataFrame:
         df = pro.margin(
             start_date=start.strftime("%Y%m%d"), end_date=end.strftime("%Y%m%d")
         )
-    except Exception:
+    except Exception as exc:
+        logger.warning("获取融资净买入失败: %s", exc)
         return pd.DataFrame()
     if df is None or df.empty or "trade_date" not in df.columns:
+        logger.warning(
+            "获取融资净买入失败：Tushare margin 返回空数据，start=%s end=%s",
+            start.strftime("%Y%m%d"),
+            end.strftime("%Y%m%d"),
+        )
         return pd.DataFrame()
 
     df = df.copy()
@@ -52,11 +63,16 @@ def get_financing_net_buy_series(days: int = 60) -> pd.DataFrame:
     return grouped[["date", "融资净买入"]]
 
 
-@st.cache_data(ttl="12h")
-def get_gem_pe_series(days: int = 500) -> pd.DataFrame:
+def get_financing_net_buy_series(days: int = 60) -> pd.DataFrame:
+    """直接从 Tushare 获取融资净买入序列。"""
+    return _fetch_financing_net_buy_series(days)
+
+
+def _fetch_gem_pe_series(days: int) -> pd.DataFrame:
     """获取创业板市盈率序列。"""
     token = get_tushare_token()
     if not token:
+        logger.warning("获取创业板市盈率失败：未配置 Tushare token")
         return pd.DataFrame()
     pro = ts.pro_api(token)
     end = pd.Timestamp.now()
@@ -67,9 +83,15 @@ def get_gem_pe_series(days: int = 500) -> pd.DataFrame:
             start_date=start.strftime("%Y%m%d"),
             end_date=end.strftime("%Y%m%d"),
         )
-    except Exception:
+    except Exception as exc:
+        logger.warning("获取创业板市盈率失败: %s", exc)
         return pd.DataFrame()
     if df is None or df.empty or "trade_date" not in df.columns or "pe" not in df.columns:
+        logger.warning(
+            "获取创业板市盈率失败：Tushare daily_info 返回空数据，start=%s end=%s",
+            start.strftime("%Y%m%d"),
+            end.strftime("%Y%m%d"),
+        )
         return pd.DataFrame()
 
     df = df.copy()
@@ -77,6 +99,11 @@ def get_gem_pe_series(days: int = 500) -> pd.DataFrame:
     df["pe"] = pd.to_numeric(df["pe"], errors="coerce")
     df = df.dropna(subset=["trade_date", "pe"]).sort_values("trade_date").tail(days)
     return df.rename(columns={"trade_date": "date", "pe": "市盈率"})[["date", "市盈率"]]
+
+
+def get_gem_pe_series(days: int = 500) -> pd.DataFrame:
+    """直接从 Tushare 获取创业板市盈率序列。"""
+    return _fetch_gem_pe_series(days)
 
 
 @st.cache_data(ttl="1d")

@@ -23,6 +23,7 @@ from services.ai_analysis import (
     analyze_index_technical,
     analyze_market_overview,
 )
+from services.daily_basic_service import get_daily_basic_smart
 from services.market_overview_service import get_market_data
 from services.stock_universe_service import get_all_stocks
 from tools.utils import filter_st_bj_stocks
@@ -40,6 +41,79 @@ def _section_title(title):
         f"<div style='font-size:26px;font-weight:700;margin:8px 0 8px 0;'>{title}</div>",
         unsafe_allow_html=True,
     )
+
+
+def _render_financing_net_buy_chart(fin_series: pd.DataFrame) -> None:
+    if fin_series is None or fin_series.empty:
+        st.info("暂无融资净买入数据")
+        return
+
+    fin_series = fin_series.sort_values("date").copy()
+    fin_series["date"] = pd.to_datetime(fin_series["date"], errors="coerce")
+    fin_series["融资净买入"] = pd.to_numeric(
+        fin_series["融资净买入"], errors="coerce"
+    )
+    fin_plot_df = fin_series.dropna(subset=["date", "融资净买入"])
+    if fin_plot_df.empty:
+        st.info("暂无融资净买入数据")
+        return
+
+    colors = fin_plot_df["融资净买入"].apply(
+        lambda x: "#e74c3c" if x >= 0 else "#2ecc71"
+    )
+    fig_financing = go.Figure(
+        go.Bar(
+            x=fin_plot_df["date"],
+            y=fin_plot_df["融资净买入"],
+            marker_color=colors,
+            name="融资净买入",
+            hovertemplate="%{x|%Y-%m-%d}<br>净买入: %{y:.0f}<extra></extra>",
+        )
+    )
+    fig_financing.update_layout(
+        title="融资净买入（近60交易日）",
+        xaxis_title="日期",
+        yaxis_title="金额",
+        height=300,
+        hovermode="x unified",
+        bargap=0.2,
+    )
+    st.plotly_chart(fig_financing, use_container_width=True)
+
+
+def _render_gem_pe_chart(gem_pe_series: pd.DataFrame) -> None:
+    if gem_pe_series is None or gem_pe_series.empty:
+        st.info("暂无创业板市盈率数据")
+        return
+
+    gem_pe_series = gem_pe_series.sort_values("date").copy()
+    gem_pe_series["date"] = pd.to_datetime(gem_pe_series["date"], errors="coerce")
+    gem_pe_series["市盈率"] = pd.to_numeric(gem_pe_series["市盈率"], errors="coerce")
+    gem_plot_df = gem_pe_series.dropna(subset=["date", "市盈率"])
+    if gem_plot_df.empty:
+        st.info("暂无创业板市盈率数据")
+        return
+
+    fig_gem_pe = go.Figure()
+    fig_gem_pe.add_trace(
+        go.Scatter(
+            x=gem_plot_df["date"],
+            y=gem_plot_df["市盈率"],
+            mode="lines+markers",
+            name="创业板市盈率",
+            line=dict(color="#1f77b4", width=2),
+            marker=dict(size=4),
+            hovertemplate="%{x|%Y-%m-%d}<br>PE: %{y:.2f}<extra></extra>",
+        )
+    )
+    fig_gem_pe.update_layout(
+        title="创业板市盈率（近500交易日）",
+        xaxis_title="日期",
+        yaxis_title="PE",
+        height=300,
+        hovermode="x unified",
+    )
+    st.plotly_chart(fig_gem_pe, use_container_width=True)
 
 
 @st.cache_data(ttl="1h")
@@ -184,6 +258,7 @@ def build_top100_section(select_date, all_stocks_df=None):
     source_df = (
         all_stocks_df if all_stocks_df is not None else get_all_stocks(select_date)
     )
+    range_distribution = _build_pct_distribution(source_df)
     today_top_stocks = _normalize_top_stocks_df(source_df)
 
     if not today_top_stocks.empty:
@@ -242,6 +317,7 @@ def build_top100_section(select_date, all_stocks_df=None):
     return {
         "top_100_turnover": turnover_records,
         "top_100_range": range_data,
+        "top100_range_distribution": range_distribution,
     }, source_df
 
 
@@ -344,6 +420,7 @@ def build_review_data(select_date, show_modules=None):
         review_data["top_100_range"] = {"sh_stocks": [], "cyb_kcb_stocks": []}
         review_data["top_100_gainers"] = []
         review_data["top_100_losers"] = []
+        review_data["top100_range_distribution"] = []
 
     return review_data
 
@@ -527,6 +604,8 @@ def display_review_data(review_data, show_modules=None):
                 show_ui=True,
             )
 
+        fin_series = get_financing_net_buy_series(60)
+        gem_pe_series = get_gem_pe_series(500)
         csv_file = os.path.join("datas", "market_data.csv")
         if os.path.exists(csv_file):
             try:
@@ -563,8 +642,6 @@ def display_review_data(review_data, show_modules=None):
                         limit_up = latest_row.get("涨停", limit_up)
                         limit_down = latest_row.get("跌停", limit_down)
                         activity = latest_row.get("活跃度", activity)
-                    fin_series = get_financing_net_buy_series(60)
-                    gem_pe_series = get_gem_pe_series(500)
 
                     first_row = st.columns(3)
                     with first_row[0]:
@@ -630,41 +707,7 @@ def display_review_data(review_data, show_modules=None):
                                 st.plotly_chart(fig_activity, use_container_width=True)
 
                     with first_row[2]:
-                        if fin_series is not None and not fin_series.empty:
-                            fin_series = fin_series.sort_values("date").copy()
-                            fin_series["date"] = pd.to_datetime(
-                                fin_series["date"], errors="coerce"
-                            )
-                            fin_series["融资净买入"] = pd.to_numeric(
-                                fin_series["融资净买入"], errors="coerce"
-                            )
-                            fin_plot_df = fin_series.dropna(
-                                subset=["date", "融资净买入"]
-                            )
-                            if fin_plot_df.empty:
-                                st.info("暂无融资净买入数据")
-                            else:
-                                colors = fin_plot_df["融资净买入"].apply(
-                                    lambda x: "#e74c3c" if x >= 0 else "#2ecc71"
-                                )
-                                fig_financing = go.Figure(
-                                    go.Bar(
-                                        x=fin_plot_df["date"],
-                                        y=fin_plot_df["融资净买入"],
-                                        marker_color=colors,
-                                        name="融资净买入",
-                                        hovertemplate="%{x|%Y-%m-%d}<br>净买入: %{y:.0f}<extra></extra>",
-                                    )
-                                )
-                                fig_financing.update_layout(
-                                    title="融资净买入（近60交易日）",
-                                    xaxis_title="日期",
-                                    yaxis_title="金额",
-                                    height=300,
-                                    hovermode="x unified",
-                                    bargap=0.2,
-                                )
-                                st.plotly_chart(fig_financing, use_container_width=True)
+                        _render_financing_net_buy_chart(fin_series)
 
                     second_row = st.columns(3)
                     with second_row[0]:
@@ -780,42 +823,7 @@ def display_review_data(review_data, show_modules=None):
                                 st.plotly_chart(fig_limit, use_container_width=True)
 
                     with second_row[2]:
-                        if gem_pe_series is not None and not gem_pe_series.empty:
-                            gem_pe_series = gem_pe_series.sort_values("date").copy()
-                            gem_pe_series["date"] = pd.to_datetime(
-                                gem_pe_series["date"], errors="coerce"
-                            )
-                            gem_pe_series["市盈率"] = pd.to_numeric(
-                                gem_pe_series["市盈率"], errors="coerce"
-                            )
-                            gem_plot_df = gem_pe_series.dropna(
-                                subset=["date", "市盈率"]
-                            )
-                            if gem_plot_df.empty:
-                                st.info("暂无创业板市盈率数据")
-                            else:
-                                fig_gem_pe = go.Figure()
-                                fig_gem_pe.add_trace(
-                                    go.Scatter(
-                                        x=gem_plot_df["date"],
-                                        y=gem_plot_df["市盈率"],
-                                        mode="lines+markers",
-                                        name="创业板市盈率",
-                                        line=dict(color="#1f77b4", width=2),
-                                        marker=dict(size=4),
-                                        hovertemplate="%{x|%Y-%m-%d}<br>PE: %{y:.2f}<extra></extra>",
-                                    )
-                                )
-                                fig_gem_pe.update_layout(
-                                    title="创业板市盈率（近500交易日）",
-                                    xaxis_title="日期",
-                                    yaxis_title="PE",
-                                    height=300,
-                                    hovermode="x unified",
-                                )
-                                st.plotly_chart(fig_gem_pe, use_container_width=True)
-                        else:
-                            st.info("暂无创业板市盈率数据")
+                        _render_gem_pe_chart(gem_pe_series)
 
                     # 准备市场数据用于AI分析
                     market_data_for_ai = {
@@ -912,7 +920,9 @@ def display_review_data(review_data, show_modules=None):
         # 保留原有2张图：当日涨跌幅分布 + 成交额Top100涨跌分布
         top_100_records = review_data.get("top_100_turnover", [])
         market_overview = review_data.get("market_overview", {})
-        range_distribution = market_overview.get("range_distribution", [])
+        range_distribution = review_data.get("top100_range_distribution", [])
+        if not range_distribution:
+            range_distribution = market_overview.get("range_distribution", [])
 
         top_100_by_turnover = (
             pd.DataFrame(top_100_records) if top_100_records else pd.DataFrame()
@@ -1204,11 +1214,40 @@ show_modules = {
     "top100": show_top100,
 }
 realtime_load_btn = st.button("实时Load")
+sqlite_status_placeholder = st.empty()
 
 if realtime_load_btn:
     if select_date.weekday() >= 5:
         st.warning("非交易日")
         st.stop()
 
-    review_data = build_review_data(select_date, show_modules)
-    display_review_data(review_data, show_modules)
+    trade_date = select_date.strftime("%Y%m%d")
+    try:
+        with st.spinner("写入当日 daily_basic 到 SQLite..."):
+            daily_basic_df = get_daily_basic_smart(trade_date=trade_date, use_cache=True)
+        if daily_basic_df is None or daily_basic_df.empty:
+            sqlite_status_placeholder.warning(
+                f"{trade_date} 的 daily_basic 暂未写入 SQLite，请稍后重试。"
+            )
+            st.stop()
+        sqlite_status_placeholder.success("SQLITE存入成功")
+    except Exception as exc:
+        sqlite_status_placeholder.warning(
+            f"{trade_date} 的 daily_basic 写入 SQLite 失败: {exc}"
+        )
+        st.stop()
+
+    review_data = build_review_data(select_date, None)
+    st.session_state["review_data"] = review_data
+    st.session_state["review_data_date"] = select_date.strftime("%Y-%m-%d")
+
+loaded_review_data = st.session_state.get("review_data")
+loaded_review_date = st.session_state.get("review_data_date")
+
+if loaded_review_data:
+    current_date_str = select_date.strftime("%Y-%m-%d")
+    if loaded_review_date and loaded_review_date != current_date_str:
+        st.info(
+            f"当前展示的是 {loaded_review_date} 的加载结果。若要查看 {current_date_str}，请重新点击“实时Load”。"
+        )
+    display_review_data(loaded_review_data, show_modules)

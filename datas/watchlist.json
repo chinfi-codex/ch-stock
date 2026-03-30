@@ -3,32 +3,83 @@
     {
       "code": "002705",
       "name": "新宝股份",
-      "add_time": "2026-03-26 22:02:56"
+      "add_time": "2026-03-26 22:02:56",
+      "source_group": "未知来源",
+      "source_groups": [
+        "未知来源"
+      ]
     },
     {
       "code": "002902",
       "name": "铭普光磁",
-      "add_time": "2026-03-26 22:07:15"
+      "add_time": "2026-03-26 22:07:15",
+      "source_group": "未知来源",
+      "source_groups": [
+        "未知来源"
+      ]
     },
     {
       "code": "603538",
       "name": "美诺华",
-      "add_time": "2026-03-26 22:07:27"
+      "add_time": "2026-03-26 22:07:27",
+      "source_group": "未知来源",
+      "source_groups": [
+        "未知来源"
+      ]
     },
     {
       "code": "002192",
       "name": "融捷股份",
-      "add_time": "2026-03-26 22:07:34"
+      "add_time": "2026-03-26 22:07:34",
+      "source_group": "未知来源",
+      "source_groups": [
+        "未知来源"
+      ]
     },
     {
       "code": "603026",
       "name": "石大胜华",
-      "add_time": "2026-03-26 22:07:38"
+      "add_time": "2026-03-26 22:07:38",
+      "source_group": "未知来源",
+      "source_groups": [
+        "未知来源"
+      ]
     },
     {
       "code": "600207",
       "name": "安彩高科",
-      "add_time": "2026-03-26 22:08:14"
+      "add_time": "2026-03-26 22:08:14",
+      "source_group": "未知来源",
+      "source_groups": [
+        "未知来源"
+      ]
+    },
+    {
+      "code": "002850",
+      "name": "科达利",
+      "add_time": "2026-03-30 18:38:57",
+      "source_group": "未知来源",
+      "source_groups": [
+        "未知来源"
+      ]
+    },
+    {
+      "code": "600602",
+      "name": "云赛智联",
+      "add_time": "2026-03-30 18:45:58",
+      "source_group": "未知来源",
+      "source_groups": [
+        "未知来源"
+      ]
+    },
+    {
+      "code": "002810",
+      "name": "山东赫达",
+      "add_time": "2026-03-30 18:50:14",
+      "source_group": "容量上涨股票",
+      "source_groups": [
+        "容量上涨股票"
+      ]
     }
   ]
 }

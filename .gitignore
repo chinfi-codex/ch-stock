@@ -50,3 +50,6 @@ datas/reviews/*.json
 *.db
 *.db-journal
 *.db-wal
+
+# Local product artifacts
+prd/
