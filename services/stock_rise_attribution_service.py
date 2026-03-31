@@ -58,15 +58,6 @@ SOURCE_ORDER = (
     SOURCE_ZSXQ,
     SOURCE_REPORT_EARNINGS,
 )
-DEFAULT_ALLOWED_SEARCH_DOMAINS = [
-    "cninfo.com.cn",
-    "cnstock.com",
-    "stcn.com",
-    "cls.cn",
-    "p5w.net",
-    "stockstar.com",
-    "jrj.com.cn",
-]
 DEFAULT_WINDOW_DAYS = 5
 CNINFO_WINDOW_DAYS = 30
 RESEARCH_WINDOW_DAYS = 90
@@ -100,6 +91,33 @@ def _normalize_source_status(
         "status": status,
         "count": int(count or 0),
         "error": error.strip(),
+    }
+
+
+def _build_debug_entry(
+    stage: str,
+    *,
+    message: str = "",
+    data: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    return {
+        "stage": str(stage or "").strip(),
+        "message": str(message or "").strip(),
+        "data": data or {},
+    }
+
+
+def _build_source_debug(
+    source: str,
+    *,
+    window_dates: Optional[List[str]] = None,
+    steps: Optional[List[Dict[str, Any]]] = None,
+) -> Dict[str, Any]:
+    return {
+        "source": source,
+        "source_label": SOURCE_LABELS.get(source, source),
+        "window_dates": list(window_dates or []),
+        "steps": list(steps or []),
     }
 
 
@@ -460,94 +478,199 @@ def _normalize_zsxq_items(records: List[Dict[str, Any]]) -> List[Dict[str, Any]]
     return items
 
 
-def _normalize_search_items(
-    records: List[Dict[str, Any]],
-    window_dates: List[str],
-) -> List[Dict[str, Any]]:
-    window_date_set = set(window_dates)
-    items = []
-    for record in records:
-        event_date = str(record.get("date", "")).strip()
-        if event_date and event_date not in window_date_set:
-            continue
-
-        item = dict(record)
-        item["summary"] = _truncate_summary(item.get("summary", ""))
-        if not event_date:
-            tags = list(item.get("tags") or [])
-            if "时间未知" not in tags:
-                tags.append("时间未知")
-            item["tags"] = tags
-        items.append(item)
-    return items
-
-
 def _search_queries(stock_name: str, stock_code: str) -> List[str]:
+    del stock_code
     return [
-        f"{stock_name} {stock_code} A股 公告 业绩",
-        f"{stock_name} {stock_code} 公司 新闻",
-        f"{stock_name} {stock_code} 互动 问答",
+        f"{stock_name} 上涨原因溯源，根据一周内高置信度证据/新闻，直接给出结论，100字以内。"
     ]
 
 
 def _run_cninfo(stock_identity: Dict[str, str], window_dates: List[str]) -> Dict[str, Any]:
+    debug_steps: List[Dict[str, Any]] = []
     org_id = stock_identity.get("org_id") or get_cninfo_orgid(stock_identity["code"])
+    debug_steps.append(
+        _build_debug_entry(
+            "resolve_org_id",
+            data={
+                "requested_code": stock_identity["code"],
+                "input_org_id": stock_identity.get("org_id", ""),
+                "resolved_org_id": org_id or "",
+            },
+        )
+    )
     records = _fetch_cninfo_records(
         code=stock_identity["code"],
         org_id=org_id or "",
         tab_type="fulltext",
         window_dates=window_dates,
     )
+    debug_steps.append(
+        _build_debug_entry(
+            "fetch_records",
+            data={
+                "tab_type": "fulltext",
+                "record_count": len(records),
+                "titles": [
+                    str(record.get("announcementTitle", "")).strip()
+                    for record in records[:10]
+                ],
+            },
+        )
+    )
+    original_count = len(records)
     records = _filter_cninfo_earnings_categories(records)
+    debug_steps.append(
+        _build_debug_entry(
+            "filter_earnings_categories",
+            data={
+                "before_count": original_count,
+                "after_count": len(records),
+                "filtered_count": original_count - len(records),
+            },
+        )
+    )
     items = _normalize_cninfo_items(records, source=SOURCE_CNINFO, base_tags=["公告"])
+    debug_steps.append(
+        _build_debug_entry(
+            "normalize_items",
+            data={
+                "item_count": len(items),
+                "titles": [item.get("title", "") for item in items[:10]],
+            },
+        )
+    )
     if not items:
         return {
             "status": _normalize_source_status(SOURCE_CNINFO, "empty", count=0),
             "items": [],
+            "debug": _build_source_debug(
+                SOURCE_CNINFO,
+                window_dates=window_dates,
+                steps=debug_steps,
+            ),
         }
     return {
         "status": _normalize_source_status(SOURCE_CNINFO, "available", count=len(items)),
         "items": items,
+        "debug": _build_source_debug(
+            SOURCE_CNINFO,
+            window_dates=window_dates,
+            steps=debug_steps,
+        ),
     }
 
 
 def _run_research(stock_identity: Dict[str, str], window_dates: List[str]) -> Dict[str, Any]:
+    debug_steps: List[Dict[str, Any]] = []
     org_id = stock_identity.get("org_id") or get_cninfo_orgid(stock_identity["code"])
+    debug_steps.append(
+        _build_debug_entry(
+            "resolve_org_id",
+            data={
+                "requested_code": stock_identity["code"],
+                "input_org_id": stock_identity.get("org_id", ""),
+                "resolved_org_id": org_id or "",
+            },
+        )
+    )
     records = _fetch_cninfo_records(
         code=stock_identity["code"],
         org_id=org_id or "",
         tab_type="relation",
         window_dates=window_dates,
     )
+    debug_steps.append(
+        _build_debug_entry(
+            "fetch_records",
+            data={
+                "tab_type": "relation",
+                "record_count": len(records),
+                "titles": [
+                    str(record.get("announcementTitle", "")).strip()
+                    for record in records[:10]
+                ],
+            },
+        )
+    )
     items = _normalize_cninfo_items(records, source=SOURCE_RESEARCH, base_tags=["机构调研"])
+    debug_steps.append(
+        _build_debug_entry(
+            "normalize_items",
+            data={
+                "item_count": len(items),
+                "titles": [item.get("title", "") for item in items[:10]],
+            },
+        )
+    )
     if not items:
         return {
             "status": _normalize_source_status(SOURCE_RESEARCH, "empty", count=0),
             "items": [],
+            "debug": _build_source_debug(
+                SOURCE_RESEARCH,
+                window_dates=window_dates,
+                steps=debug_steps,
+            ),
         }
     return {
         "status": _normalize_source_status(
             SOURCE_RESEARCH, "available", count=len(items)
         ),
         "items": items,
+        "debug": _build_source_debug(
+            SOURCE_RESEARCH,
+            window_dates=window_dates,
+            steps=debug_steps,
+        ),
     }
 
 
 def _run_p5w(stock_identity: Dict[str, str], window_dates: List[str]) -> Dict[str, Any]:
     raw_items: List[Dict[str, Any]] = []
     errors: List[str] = []
+    debug_steps: List[Dict[str, Any]] = []
     for date_str in window_dates:
         result = collect_p5w_interaction(date=date_str, company_code=stock_identity["code"])
+        fetched_items = result.get("items") or []
+        debug_steps.append(
+            _build_debug_entry(
+                "fetch_daily_interaction",
+                data={
+                    "date": date_str,
+                    "error": result.get("error", ""),
+                    "raw_count": len(fetched_items),
+                    "titles": [
+                        str(item.get("title", "")).strip()
+                        for item in fetched_items[:10]
+                    ],
+                },
+            )
+        )
         if result.get("error"):
             errors.append(f"{date_str}: {result['error']}")
             continue
-        raw_items.extend(result.get("items") or [])
+        raw_items.extend(fetched_items)
 
     items = _normalize_p5w_items(raw_items)
+    debug_steps.append(
+        _build_debug_entry(
+            "normalize_items",
+            data={
+                "raw_count": len(raw_items),
+                "item_count": len(items),
+                "titles": [item.get("title", "") for item in items[:10]],
+            },
+        )
+    )
     if items:
         return {
             "status": _normalize_source_status(SOURCE_P5W, "available", count=len(items)),
             "items": items,
+            "debug": _build_source_debug(
+                SOURCE_P5W,
+                window_dates=window_dates,
+                steps=debug_steps,
+            ),
         }
 
     status = "failed" if errors and len(errors) == len(window_dates) else "empty"
@@ -555,70 +678,121 @@ def _run_p5w(stock_identity: Dict[str, str], window_dates: List[str]) -> Dict[st
     return {
         "status": _normalize_source_status(SOURCE_P5W, status, count=0, error=error_text),
         "items": [],
+        "debug": _build_source_debug(
+            SOURCE_P5W,
+            window_dates=window_dates,
+            steps=debug_steps,
+        ),
     }
 
 
 def _run_search(stock_identity: Dict[str, str], window_dates: List[str]) -> Dict[str, Any]:
-    raw_items: List[Dict[str, Any]] = []
-    errors: List[str] = []
-
-    for query in _search_queries(stock_identity["name"], stock_identity["code"]):
-        result = search_web_content(
-            query,
-            allowed_domains=DEFAULT_ALLOWED_SEARCH_DOMAINS,
-            limit=3,
-            fetch_reader_summary=True,
+    debug_steps: List[Dict[str, Any]] = []
+    query = _search_queries(stock_identity["name"], stock_identity["code"])[0]
+    result = search_web_content(
+        query,
+        limit=1,
+        fetch_reader_summary=True,
+    )
+    result_status = result.get("status", "failed")
+    result_content = str(result.get("content", "")).strip()
+    debug_steps.append(
+        _build_debug_entry(
+            "run_query",
+            data={
+                "query": query,
+                "status": result_status,
+                "error": result.get("error", ""),
+                "content_length": len(result_content),
+                "content_preview": result_content[:120],
+            },
         )
-        result_status = result.get("status", "failed")
-        if result_status == "unconfigured":
-            return {
-                "status": _normalize_source_status(
-                    SOURCE_SEARCH,
-                    "unconfigured",
-                    count=0,
-                    error=result.get("error", ""),
-                ),
-                "items": [],
-            }
-        if result_status == "failed":
-            errors.append(result.get("error", ""))
-            continue
-        if result_status == "available":
-            raw_items.extend(result.get("items") or [])
-
-    items = _normalize_search_items(raw_items, window_dates)
-    items = _dedupe_evidence_items(items)
-    items = _sort_evidence_items(items)
-    items = items[:5]
-
-    if items:
+    )
+    if result_status == "unconfigured":
         return {
             "status": _normalize_source_status(
                 SOURCE_SEARCH,
-                "available",
-                count=len(items),
+                "unconfigured",
+                count=0,
+                error=result.get("error", ""),
             ),
-            "items": items,
+            "items": [],
+            "debug": _build_source_debug(
+                SOURCE_SEARCH,
+                window_dates=window_dates,
+                steps=debug_steps,
+            ),
         }
-
-    if errors and not raw_items:
+    if result_status == "failed":
         return {
             "status": _normalize_source_status(
                 SOURCE_SEARCH,
                 "failed",
                 count=0,
-                error=" | ".join([err for err in errors if err]),
+                error=result.get("error", ""),
             ),
             "items": [],
+            "debug": _build_source_debug(
+                SOURCE_SEARCH,
+                window_dates=window_dates,
+                steps=debug_steps,
+            ),
+        }
+    if result_status != "available" or not result_content:
+        return {
+            "status": _normalize_source_status(SOURCE_SEARCH, "empty", count=0),
+            "items": [],
+            "debug": _build_source_debug(
+                SOURCE_SEARCH,
+                window_dates=window_dates,
+                steps=debug_steps,
+            ),
         }
 
+    items = [
+        {
+            "source": SOURCE_SEARCH,
+            "source_label": SOURCE_LABELS[SOURCE_SEARCH],
+            "date": "",
+            "title": f"{stock_identity['name']} 上涨原因溯源",
+            "summary": _truncate_summary(result_content),
+            "url": "",
+            "evidence_level": "auxiliary",
+            "tags": ["搜索聚合", "时间未知"],
+            "raw": {
+                "provider": "kimi_cli",
+                "query": query,
+                "content": result_content,
+            },
+        }
+    ]
+    debug_steps.append(
+        _build_debug_entry(
+            "build_search_evidence",
+            data={
+                "item_count": len(items),
+                "title": items[0]["title"],
+                "summary_length": len(items[0]["summary"]),
+            },
+        )
+    )
     return {
-        "status": _normalize_source_status(SOURCE_SEARCH, "empty", count=0),
-        "items": [],
+        "status": _normalize_source_status(
+            SOURCE_SEARCH,
+            "available",
+            count=len(items),
+        ),
+        "items": items,
+        "debug": _build_source_debug(
+            SOURCE_SEARCH,
+            window_dates=window_dates,
+            steps=debug_steps,
+        ),
     }
 
 
 def _run_zsxq(stock_identity: Dict[str, str], window_dates: List[str]) -> Dict[str, Any]:
+    debug_steps: List[Dict[str, Any]] = []
     if not get_zsxq_cookie() or not get_zsxq_group_ids():
         return {
             "status": _normalize_source_status(
@@ -628,24 +802,74 @@ def _run_zsxq(stock_identity: Dict[str, str], window_dates: List[str]) -> Dict[s
                 error="未配置 ZSXQ_COOKIE 或 ZSXQ_GROUP_IDS",
             ),
             "items": [],
+            "debug": _build_source_debug(
+                SOURCE_ZSXQ,
+                window_dates=window_dates,
+                steps=[
+                    _build_debug_entry(
+                        "config_check",
+                        data={
+                            "cookie_configured": bool(get_zsxq_cookie()),
+                            "group_ids_configured": bool(get_zsxq_group_ids()),
+                        },
+                    )
+                ],
+            ),
         }
 
     raw_items: List[Dict[str, Any]] = []
     errors: List[str] = []
     for date_str in window_dates:
         result = fetch_topics_by_date(date_str, limit=30)
+        fetched_items = result.get("items") or []
+        matched_items = []
+        unmatched_titles = []
         if result.get("error"):
             errors.append(result["error"])
-        for item in result.get("items") or []:
-            if _topic_matches_stock(item, stock_identity["code"], stock_identity["name"]):
+        for item in fetched_items:
+            matched = _topic_matches_stock(item, stock_identity["code"], stock_identity["name"])
+            if matched:
+                matched_items.append(item)
                 raw_items.append(item)
+            elif len(unmatched_titles) < 10:
+                unmatched_titles.append(str(item.get("title", "")).strip())
+        debug_steps.append(
+            _build_debug_entry(
+                "fetch_topics_by_date",
+                data={
+                    "date": date_str,
+                    "error": result.get("error", ""),
+                    "raw_count": len(fetched_items),
+                    "matched_count": len(matched_items),
+                    "matched_titles": [
+                        str(item.get("title", "")).strip() for item in matched_items[:10]
+                    ],
+                    "unmatched_titles_sample": unmatched_titles,
+                },
+            )
+        )
 
     items = _normalize_zsxq_items(raw_items)
     items = _dedupe_evidence_items(items)
+    debug_steps.append(
+        _build_debug_entry(
+            "normalize_and_dedupe",
+            data={
+                "matched_raw_count": len(raw_items),
+                "final_count": len(items),
+                "titles": [item.get("title", "") for item in items[:10]],
+            },
+        )
+    )
     if items:
         return {
             "status": _normalize_source_status(SOURCE_ZSXQ, "available", count=len(items)),
             "items": items,
+            "debug": _build_source_debug(
+                SOURCE_ZSXQ,
+                window_dates=window_dates,
+                steps=debug_steps,
+            ),
         }
 
     if errors and not raw_items:
@@ -657,11 +881,21 @@ def _run_zsxq(stock_identity: Dict[str, str], window_dates: List[str]) -> Dict[s
                 error=" | ".join(errors),
             ),
             "items": [],
+            "debug": _build_source_debug(
+                SOURCE_ZSXQ,
+                window_dates=window_dates,
+                steps=debug_steps,
+            ),
         }
 
     return {
         "status": _normalize_source_status(SOURCE_ZSXQ, "empty", count=0),
         "items": [],
+        "debug": _build_source_debug(
+            SOURCE_ZSXQ,
+            window_dates=window_dates,
+            steps=debug_steps,
+        ),
     }
 
 
@@ -669,6 +903,7 @@ def _run_report_earnings(
     stock_identity: Dict[str, str],
     window_dates: List[str],
 ) -> Dict[str, Any]:
+    debug_steps: List[Dict[str, Any]] = []
     try:
         result = get_annual_report_parser_result(
             stock_identity["code"],
@@ -683,9 +918,33 @@ def _run_report_earnings(
                 error=str(exc),
             ),
             "items": [],
+            "debug": _build_source_debug(
+                SOURCE_REPORT_EARNINGS,
+                window_dates=window_dates,
+                steps=[
+                    _build_debug_entry(
+                        "load_report",
+                        data={
+                            "report_limit": REPORT_EARNINGS_LIMIT,
+                            "exception": str(exc),
+                        },
+                    )
+                ],
+            ),
         }
 
     reports = result.get("reports") or []
+    debug_steps.append(
+        _build_debug_entry(
+            "load_report",
+            data={
+                "report_limit": REPORT_EARNINGS_LIMIT,
+                "overall_status": result.get("overall_status", ""),
+                "report_count": len(reports),
+                "errors": result.get("errors") or [],
+            },
+        )
+    )
     if not reports:
         overall_status = result.get("overall_status", "")
         status = (
@@ -701,10 +960,26 @@ def _run_report_earnings(
                 error=" | ".join(result.get("errors") or []),
             ),
             "items": [],
+            "debug": _build_source_debug(
+                SOURCE_REPORT_EARNINGS,
+                window_dates=window_dates,
+                steps=debug_steps,
+            ),
         }
 
     report = reports[0]
     financial_status = str(report.get("report_status", {}).get("financial_status", "")).strip()
+    debug_steps.append(
+        _build_debug_entry(
+            "select_latest_report",
+            data={
+                "report_title": report.get("report_title", ""),
+                "announcement_date": report.get("announcement_date", ""),
+                "financial_status": financial_status,
+                "financial_change_count": len(report.get("financial_changes") or []),
+            },
+        )
+    )
     if financial_status == "financial_failed":
         return {
             "status": _normalize_source_status(
@@ -714,6 +989,11 @@ def _run_report_earnings(
                 error=" | ".join(result.get("errors") or []),
             ),
             "items": [],
+            "debug": _build_source_debug(
+                SOURCE_REPORT_EARNINGS,
+                window_dates=window_dates,
+                steps=debug_steps,
+            ),
         }
 
     if financial_status == "financial_partially_loaded":
@@ -729,6 +1009,11 @@ def _run_report_earnings(
             error=" | ".join(result.get("errors") or []),
         ),
         "items": [_normalize_report_earnings_item(report, status)],
+        "debug": _build_source_debug(
+            SOURCE_REPORT_EARNINGS,
+            window_dates=window_dates,
+            steps=debug_steps,
+        ),
     }
 
 
@@ -793,6 +1078,7 @@ def get_stock_rise_attribution(
         for source in SOURCE_ORDER
     }
     source_results: List[Dict[str, Any]] = []
+    source_debugs: List[Dict[str, Any]] = []
     evidence_items: List[Dict[str, Any]] = []
 
     selected_source_set = set(selected_sources)
@@ -800,6 +1086,19 @@ def get_stock_rise_attribution(
     for source in SOURCE_ORDER:
         if source not in selected_source_set:
             source_results.append(_normalize_source_status(source, "not_selected", count=0))
+            source_debugs.append(
+                _build_source_debug(
+                    source,
+                    window_dates=source_windows[source],
+                    steps=[
+                        _build_debug_entry(
+                            "selection",
+                            message="来源未勾选，跳过执行",
+                            data={"selected": False},
+                        )
+                    ],
+                )
+            )
             continue
         window_dates = source_windows[source]
         if source == SOURCE_CNINFO:
@@ -818,6 +1117,12 @@ def get_stock_rise_attribution(
             continue
 
         source_results.append(result["status"])
+        source_debugs.append(
+            result.get(
+                "debug",
+                _build_source_debug(source, window_dates=window_dates, steps=[]),
+            )
+        )
         evidence_items.extend(result["items"])
 
     evidence_items = _dedupe_evidence_items(evidence_items)
@@ -833,6 +1138,7 @@ def get_stock_rise_attribution(
         "window_dates": default_window_dates,
         "source_windows": source_windows,
         "source_statuses": source_results,
+        "source_debugs": source_debugs,
         "evidence_items": evidence_items,
         "ai_summary": ai_summary,
     }
