@@ -171,6 +171,7 @@ from tools.kline_data import (
     plotK,
 )
 from infra.llm_client import call_kimi_print, clean_ai_output, ai_summarize_cached
+from services.annual_report_service import get_annual_report_parser_result
 from tools.crawlers import cninfo_announcement_spider, get_cninfo_orgid
 
 
@@ -888,6 +889,98 @@ def format_percent(value):
         return str(value)
 
 
+@st.cache_data(ttl="6h")
+def get_annual_report_parser_view_data(ts_code: str, report_limit: int) -> dict:
+    """缓存年报解析结果，减少重复请求。"""
+    return get_annual_report_parser_result(ts_code, report_limit=report_limit)
+
+
+def render_annual_report_parser(ts_code: str) -> None:
+    """渲染年报解析模块。"""
+    with st.expander("📄 年报解析", expanded=True):
+        report_limit = st.selectbox(
+            "报告数量",
+            options=[1, 2, 3],
+            index=0,
+            key=f"annual_report_limit_{ts_code}",
+        )
+
+        with st.spinner("正在解析最新年报/半年报..."):
+            result = get_annual_report_parser_view_data(ts_code, report_limit)
+
+        if result.get("fallback_used"):
+            st.caption("报告定位已自动降级到巨潮公告，财务数据仍使用 TuShare。")
+
+        if result.get("errors"):
+            st.caption("状态提示：" + " | ".join(result["errors"][:2]))
+
+        reports = result.get("reports", [])
+        if not reports:
+            st.warning("未找到可解析的年报或半年报。")
+            return
+
+        for report_index, report in enumerate(reports, start=1):
+            with st.container(border=True):
+                st.markdown(f"**{report['report_title']}**")
+
+                meta_cols = st.columns(4)
+                meta_cols[0].metric("报告期", report.get("report_period", "-"))
+                meta_cols[1].metric("公告日", report.get("announcement_date", "-"))
+                meta_cols[2].metric("来源", report.get("report_source", "-"))
+                meta_cols[3].metric("章节数", len(report.get("management_sections", [])))
+
+                financial_changes = report.get("financial_changes", [])
+                if financial_changes:
+                    financial_df = pd.DataFrame(financial_changes).copy()
+                    financial_df["当前值"] = financial_df.apply(
+                        lambda row: format_number(row["current_value"], "" if row["unit"] == "元" else row["unit"]),
+                        axis=1,
+                    )
+                    financial_df["对比值"] = financial_df.apply(
+                        lambda row: format_number(row["previous_value"], "" if row["unit"] == "元" else row["unit"]),
+                        axis=1,
+                    )
+                    financial_df["变化值"] = financial_df.apply(
+                        lambda row: format_number(row["change_value"], "" if row["unit"] == "元" else row["unit"]),
+                        axis=1,
+                    )
+                    financial_df["变化率"] = financial_df["change_rate"].apply(format_percent)
+                    display_df = financial_df[
+                        ["metric_name", "当前值", "对比值", "变化值", "变化率", "status"]
+                    ].rename(
+                        columns={
+                            "metric_name": "指标",
+                            "status": "状态",
+                        }
+                    )
+                    st.dataframe(display_df, use_container_width=True, hide_index=True)
+                else:
+                    st.info("暂无财务指标变化数据。")
+
+                sections = report.get("management_sections", [])
+                if not sections:
+                    st.info("未命中经营分析相关章节。")
+                    continue
+
+                for section in sections:
+                    with st.expander(
+                        f"{section['section_order']}. {section.get('section_title', '未命名章节')}",
+                        expanded=False,
+                    ):
+                        section_cols = st.columns(3)
+                        section_cols[0].metric("章节状态", section.get("status", "-"))
+                        section_cols[1].metric("边界状态", section.get("boundary_status", "-"))
+                        section_cols[2].metric("文本质量", section.get("quality_flag", "-"))
+                        st.text_area(
+                            "章节原文全文",
+                            value=section.get("full_text_cleaned")
+                            or section.get("full_text_raw")
+                            or "",
+                            height=320,
+                            key=f"annual_report_section_{ts_code}_{report_index}_{section['section_order']}",
+                        )
+
+
 # =============================================================================
 # 页面主体
 # =============================================================================
@@ -1582,6 +1675,8 @@ def main():
                         st.plotly_chart(fig, use_container_width=True)
                     else:
                         st.info("📭 暂无股东人数数据")
+
+            render_annual_report_parser(ts_code)
 
             # 分组4：机构调研
             with st.expander("🏢 机构调研", expanded=True):
