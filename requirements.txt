@@ -16,6 +16,7 @@ akshare
 tushare
 websocket-client
 PyPDF2>=3.0.0
+PyMySQL>=1.1.1
 
 # Web 框架
 flask>=2.0.0
