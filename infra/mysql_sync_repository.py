@@ -7,16 +7,15 @@ MySQL 同步仓储。
 from __future__ import annotations
 
 import json
-from contextlib import contextmanager
-from datetime import date, datetime
-from typing import Any, Iterable, Iterator
+from datetime import datetime
+from typing import Any
 
-from infra.config import (
-    get_mysql_database,
-    get_mysql_host,
-    get_mysql_password,
-    get_mysql_port,
-    get_mysql_user,
+from infra.mysql_client import (
+    executemany_upsert,
+    get_mysql_connection,
+    init_etl_sync_run_log_table,
+    normalize_mysql_json_value,
+    record_sync_run as record_mysql_sync_run,
 )
 
 
@@ -58,51 +57,6 @@ DAILY_BASIC_COLUMNS = [
     "total_mv",
     "circ_mv",
 ]
-
-
-def _import_pymysql():
-    import pymysql
-
-    return pymysql
-
-
-def _validate_mysql_config() -> None:
-    missing = []
-    if not get_mysql_database():
-        missing.append("MYSQL_DATABASE")
-    if not get_mysql_user():
-        missing.append("MYSQL_USER")
-    if not get_mysql_password():
-        missing.append("MYSQL_PASSWORD")
-
-    if missing:
-        raise ValueError(f"MySQL 配置缺失: {', '.join(missing)}")
-
-
-@contextmanager
-def get_mysql_connection():
-    """获取 MySQL 连接。"""
-    _validate_mysql_config()
-    pymysql = _import_pymysql()
-
-    connection = pymysql.connect(
-        host=get_mysql_host(),
-        port=get_mysql_port(),
-        user=get_mysql_user(),
-        password=get_mysql_password(),
-        database=get_mysql_database(),
-        charset="utf8mb4",
-        cursorclass=pymysql.cursors.DictCursor,
-        autocommit=False,
-    )
-    try:
-        yield connection
-        connection.commit()
-    except Exception:
-        connection.rollback()
-        raise
-    finally:
-        connection.close()
 
 
 def init_mysql_tables() -> None:
@@ -164,76 +118,8 @@ def init_mysql_tables() -> None:
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
                 """
             )
-            cursor.execute(
-                """
-                CREATE TABLE IF NOT EXISTS etl_sync_run_log (
-                    id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
-                    job_name VARCHAR(64) NOT NULL,
-                    mode VARCHAR(32) NOT NULL,
-                    target_table VARCHAR(64) NOT NULL,
-                    trade_date DATE NULL,
-                    source_range VARCHAR(128) NULL,
-                    row_count INT NOT NULL DEFAULT 0,
-                    status VARCHAR(32) NOT NULL,
-                    error_message TEXT NULL,
-                    started_at DATETIME NULL,
-                    completed_at DATETIME NULL,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    KEY idx_etl_sync_run_log_trade_date (trade_date),
-                    KEY idx_etl_sync_run_log_status (status)
-                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
-                """
-            )
 
-
-def _chunk_records(records: list[dict[str, Any]], chunk_size: int) -> Iterator[list[dict[str, Any]]]:
-    for idx in range(0, len(records), chunk_size):
-        yield records[idx : idx + chunk_size]
-
-
-def _normalize_json_value(value: Any) -> Any:
-    if value is None:
-        return None
-    if isinstance(value, (datetime, date)):
-        return value.isoformat()
-    if hasattr(value, "item"):
-        try:
-            value = value.item()
-        except Exception:
-            pass
-    try:
-        if value != value:
-            return None
-    except Exception:
-        pass
-    return value
-
-
-def _executemany_upsert(
-    table_name: str,
-    columns: list[str],
-    update_columns: Iterable[str],
-    records: list[dict[str, Any]],
-    chunk_size: int = 500,
-) -> int:
-    if not records:
-        return 0
-
-    placeholders = ", ".join(["%s"] * len(columns))
-    update_sql = ", ".join([f"{column}=VALUES({column})" for column in update_columns])
-    sql = f"""
-        INSERT INTO {table_name} ({", ".join(columns)})
-        VALUES ({placeholders})
-        ON DUPLICATE KEY UPDATE {update_sql}
-    """
-
-    with get_mysql_connection() as conn:
-        with conn.cursor() as cursor:
-            for chunk in _chunk_records(records, chunk_size):
-                values = [tuple(record.get(column) for column in columns) for record in chunk]
-                cursor.executemany(sql, values)
-
-    return len(records)
+    init_etl_sync_run_log_table()
 
 
 def upsert_market_daily_snapshots(
@@ -249,15 +135,15 @@ def upsert_market_daily_snapshots(
         ):
             serialized["source_row_json"] = json.dumps(
                 {
-                    key: _normalize_json_value(value)
+                    key: normalize_mysql_json_value(value)
                     for key, value in serialized["source_row_json"].items()
                 },
                 ensure_ascii=False,
-                default=_normalize_json_value,
+                default=normalize_mysql_json_value,
             )
         serialized_records.append(serialized)
 
-    return _executemany_upsert(
+    return executemany_upsert(
         table_name="market_daily_snapshot",
         columns=MARKET_SNAPSHOT_COLUMNS,
         update_columns=[column for column in MARKET_SNAPSHOT_COLUMNS if column != "trade_date"],
@@ -271,7 +157,7 @@ def upsert_stock_daily_basic_records(
     chunk_size: int = 500,
 ) -> int:
     """批量 UPSERT daily_basic。"""
-    return _executemany_upsert(
+    return executemany_upsert(
         table_name="stock_daily_basic",
         columns=DAILY_BASIC_COLUMNS,
         update_columns=[
@@ -296,33 +182,15 @@ def record_sync_run(
     completed_at: datetime | None = None,
 ) -> None:
     """写入同步日志。"""
-    with get_mysql_connection() as conn:
-        with conn.cursor() as cursor:
-            cursor.execute(
-                """
-                INSERT INTO etl_sync_run_log (
-                    job_name,
-                    mode,
-                    target_table,
-                    trade_date,
-                    source_range,
-                    row_count,
-                    status,
-                    error_message,
-                    started_at,
-                    completed_at
-                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                """,
-                (
-                    job_name,
-                    mode,
-                    target_table,
-                    trade_date,
-                    source_range,
-                    row_count,
-                    status,
-                    error_message,
-                    started_at,
-                    completed_at,
-                ),
-            )
+    record_mysql_sync_run(
+        job_name=job_name,
+        mode=mode,
+        target_table=target_table,
+        trade_date=trade_date,
+        source_range=source_range,
+        row_count=row_count,
+        status=status,
+        error_message=error_message,
+        started_at=started_at,
+        completed_at=completed_at,
+    )

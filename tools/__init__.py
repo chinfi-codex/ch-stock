@@ -15,6 +15,8 @@ from .crawlers import (
     cls_telegraphs,
     cninfo_announcement_spider,
     collect_p5w_interaction,
+    fetch_cls_telegraph_records,
+    fetch_jin10_flash_records,
     fetch_topics_by_date,
     parse_zsxq_topic,
 )
@@ -88,6 +90,8 @@ __all__ = [
     "cls_telegraphs",
     "cninfo_announcement_spider",
     "collect_p5w_interaction",
+    "fetch_cls_telegraph_records",
+    "fetch_jin10_flash_records",
     "EconomicIndicators",
     "calculate_macd",
     "get_ak_interval_price_df",

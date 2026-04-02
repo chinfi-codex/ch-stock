@@ -1,0 +1,91 @@
+name: Sync Telegraphs
+
+on:
+  schedule:
+    - cron: "0 22,0,2,4,6,8,10,12,14,16 * * *"
+  workflow_dispatch:
+    inputs:
+      source:
+        description: "telegraph source"
+        required: false
+        default: "all"
+        type: choice
+        options:
+          - all
+          - cls
+          - jin10
+      hours:
+        description: "lookback hours"
+        required: false
+        default: "6"
+        type: string
+      rn:
+        description: "cls rn parameter"
+        required: false
+        default: "2000"
+        type: string
+      timeout:
+        description: "request timeout seconds"
+        required: false
+        default: "20"
+        type: string
+
+jobs:
+  sync-telegraphs:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      MYSQL_HOST: 127.0.0.1
+      MYSQL_PORT: 3307
+      MYSQL_DATABASE: Financial_News
+      MYSQL_USER: ${{ secrets.MYSQL_USER }}
+      MYSQL_PASSWORD: ${{ secrets.MYSQL_PASSWORD }}
+      JIN10_COOKIE: ${{ secrets.JIN10_COOKIE }}
+      SYNC_SSH_HOST: ${{ secrets.SYNC_SSH_HOST }}
+      SYNC_SSH_PORT: ${{ secrets.SYNC_SSH_PORT }}
+      SYNC_SSH_USER: ${{ secrets.SYNC_SSH_USER }}
+      SYNC_SSH_PASSWORD: ${{ secrets.SYNC_SSH_PASSWORD }}
+      TELEGRAPH_SOURCE: ${{ github.event.inputs.source || 'all' }}
+      TELEGRAPH_HOURS: ${{ github.event.inputs.hours || '6' }}
+      TELEGRAPH_RN: ${{ github.event.inputs.rn || '2000' }}
+      TELEGRAPH_TIMEOUT: ${{ github.event.inputs.timeout || '20' }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y sshpass netcat-openbsd
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Open SSH tunnel to MySQL
+        run: |
+          sshpass -p "$SYNC_SSH_PASSWORD" ssh \
+            -o StrictHostKeyChecking=no \
+            -o ServerAliveInterval=30 \
+            -o ExitOnForwardFailure=yes \
+            -f -N \
+            -L 3307:127.0.0.1:3306 \
+            -p "${SYNC_SSH_PORT:-22}" \
+            "$SYNC_SSH_USER@$SYNC_SSH_HOST"
+
+      - name: Verify tunnel
+        run: nc -z 127.0.0.1 3307
+
+      - name: Sync telegraphs
+        run: |
+          python scripts/sync_telegraphs.py \
+            --source "$TELEGRAPH_SOURCE" \
+            --hours "$TELEGRAPH_HOURS" \
+            --rn "$TELEGRAPH_RN" \
+            --timeout "$TELEGRAPH_TIMEOUT"

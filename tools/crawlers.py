@@ -6,20 +6,24 @@
 import time
 import datetime
 import re
+import html
 import pandas as pd
 import json
 import requests
 import hashlib
+import streamlit as st
 from bs4 import BeautifulSoup
 import logging
 import os
 import math
+from typing import Any
 from urllib.parse import urljoin
 from datetime import datetime as dt_datetime, timedelta
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
 from infra.config import (
+    get_jin10_cookie,
     get_zsxq_api_timeout,
     get_zsxq_cookie,
     get_zsxq_group_ids,
@@ -38,6 +42,10 @@ if not logger.handlers:
 
 CNINFO_PAGE_SIZE = 30
 CNINFO_TIMEOUT = 10
+DEFAULT_TELEGRAPH_TIMEOUT = 20
+DEFAULT_CLS_TELEGRAPH_RN = 2000
+CLS_TELEGRAPH_URL = "https://www.cls.cn/nodeapi/telegraphList"
+JIN10_FLASH_URL = "https://flash-api.jin10.com/get_flash_list?channel=-8200&vip=1"
 P5W_SOURCE = "p5w_interaction"
 P5W_URL = "https://ir.p5w.net/interaction/getNewSearchR.shtml"
 P5W_HEADERS = {
@@ -323,13 +331,14 @@ def _normalize_cninfo_announcements(announcements):
     return normalized_items
 
 
-def cls_telegraphs():
-    """
-    财联社-电报 https://www.cls.cn/telegraph
-    返回dataframe 对象
-    """
+def _build_cls_telegraph_signed_params(
+    *,
+    session=None,
+    rn: int = DEFAULT_CLS_TELEGRAPH_RN,
+    timeout: int = DEFAULT_TELEGRAPH_TIMEOUT,
+) -> dict[str, str]:
+    """构建 CLS 电报接口签名参数。"""
     current_time = int(time.time())
-    url = "https://www.cls.cn/nodeapi/telegraphList"
     params = {
         "app": "CailianpressWeb",
         "category": "",
@@ -337,26 +346,27 @@ def cls_telegraphs():
         "last_time": current_time,
         "os": "web",
         "refresh_type": "1",
-        "rn": "2000",
+        "rn": str(rn),
         "sv": "7.7.5",
     }
-    text = requests.get(url, params=params).url.split("?")[1]
+
+    client = session or requests.Session()
+    text = client.get(CLS_TELEGRAPH_URL, params=params, timeout=timeout).url.split("?")[1]
     if not isinstance(text, bytes):
         text = bytes(text, "utf-8")
     sha1 = hashlib.sha1(text).hexdigest()
     code = hashlib.md5(sha1.encode()).hexdigest()
+    params["sign"] = code
+    return params
 
-    params = {
-        "app": "CailianpressWeb",
-        "category": "",
-        "lastTime": current_time,
-        "last_time": current_time,
-        "os": "web",
-        "refresh_type": "1",
-        "rn": "2000",
-        "sv": "7.7.5",
-        "sign": code,
-    }
+
+def fetch_cls_telegraph_records(
+    *,
+    rn: int = DEFAULT_CLS_TELEGRAPH_RN,
+    timeout: int = DEFAULT_TELEGRAPH_TIMEOUT,
+    session=None,
+) -> list[dict[str, Any]]:
+    """抓取 CLS 电报原始记录。"""
     headers = {
         "Accept": "application/json, text/plain, */*",
         "Accept-Encoding": "gzip, deflate, br",
@@ -375,7 +385,96 @@ def cls_telegraphs():
         "Sec-Fetch-Site": "same-origin",
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/103.0.0.0 Safari/537.36",
     }
-    data = requests.get(url, headers=headers, params=params).json()
+    params = _build_cls_telegraph_signed_params(session=session, rn=rn, timeout=timeout)
+    client = session or requests.Session()
+    response = client.get(
+        CLS_TELEGRAPH_URL,
+        headers=headers,
+        params=params,
+        timeout=timeout,
+    )
+    response.raise_for_status()
+    data = response.json()
+    records = data.get("data", {}).get("roll_data", [])
+    if not isinstance(records, list):
+        raise ValueError("CLS 电报接口返回格式异常: data.roll_data 不是 list")
+    return [record for record in records if isinstance(record, dict)]
+
+
+def fetch_jin10_flash_records(
+    *,
+    timeout: int = DEFAULT_TELEGRAPH_TIMEOUT,
+    session=None,
+) -> list[dict[str, Any]]:
+    """抓取 Jin10 快讯并提取核心字段。"""
+    headers = {
+        "accept": "application/json, text/plain, */*",
+        "accept-language": "zh-CN,zh;q=0.9,en;q=0.8,zh-TW;q=0.7",
+        "content-type": "application/x-www-form-urlencoded",
+        "handleerror": "true",
+        "origin": "https://www.jin10.com",
+        "priority": "u=1, i",
+        "referer": "https://www.jin10.com/",
+        "sec-ch-ua": '"Chromium";v="146", "Not-A.Brand";v="24", "Google Chrome";v="146"',
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": '"Windows"',
+        "sec-fetch-dest": "empty",
+        "sec-fetch-mode": "cors",
+        "sec-fetch-site": "same-site",
+        "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36",
+        "x-app-id": "bVBF4FyRTn5NJF5n",
+        "x-version": "1.0.0",
+    }
+    cookie = get_jin10_cookie()
+    if cookie:
+        headers["cookie"] = cookie
+
+    client = session or requests.Session()
+    response = client.get(JIN10_FLASH_URL, headers=headers, timeout=timeout)
+    response.raise_for_status()
+    payload = response.json()
+    if not isinstance(payload, dict):
+        raise ValueError("Jin10 快讯接口返回格式异常: payload 不是 dict")
+
+    records = payload.get("data", [])
+    if not isinstance(records, list):
+        raise ValueError("Jin10 快讯接口返回格式异常: data 不是 list")
+
+    normalized_records = []
+    for item in records:
+        if not isinstance(item, dict):
+            continue
+        item_data = item.get("data", {})
+        if not isinstance(item_data, dict):
+            item_data = {}
+        normalized_records.append(
+            {
+                "id": item.get("id"),
+                "time": item.get("time"),
+                "type": item.get("type"),
+                "important": item.get("important"),
+                "channel": item.get("channel", []),
+                "tags": item.get("tags", []),
+                "title": item_data.get("title"),
+                "content": item_data.get("content"),
+                "source": item_data.get("source"),
+                "source_link": item_data.get("source_link"),
+                "pic": item_data.get("pic"),
+                "remark": item.get("remark", []),
+                "extras": item.get("extras", {}),
+                "raw": item,
+            }
+        )
+
+    return normalized_records
+
+
+def cls_telegraphs():
+    """
+    财联社-电报 https://www.cls.cn/telegraph
+    返回 dataframe 对象
+    """
+    data = {"data": {"roll_data": fetch_cls_telegraph_records()}}
     df = pd.DataFrame(data["data"]["roll_data"])
 
     df = df[["title", "content", "level", "subjects", "ctime"]]
@@ -770,6 +869,7 @@ def parse_zsxq_topic(topic):
     }
 
 
+@st.cache_data(ttl="8h")
 def fetch_topics_by_date(date, limit=50):
     """抓取指定日期的知识星球主题。"""
     group_ids_raw = get_zsxq_group_ids()

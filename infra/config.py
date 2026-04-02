@@ -81,6 +81,11 @@ def get_xueqiu_cookie() -> str:
     return _get_config_value("XUEQIU_COOKIE", "xueqiu_cookie")
 
 
+def get_jin10_cookie() -> str:
+    """获取 Jin10 Cookie。"""
+    return _get_config_value("JIN10_COOKIE", "jin10_cookie")
+
+
 def get_llm_api_key(provider: str) -> str:
     """按 provider 获取 LLM API Key。"""
     env_var_map = {
@@ -107,19 +112,18 @@ def get_llm_api_key(provider: str) -> str:
     )
 
 
-
 def get_zsxq_cookie() -> str:
-    """?????? Cookie?"""
+    """获取知识星球 Cookie。"""
     return _get_config_value("ZSXQ_COOKIE", "zsxq_cookie")
 
 
 def get_zsxq_group_ids() -> str:
-    """?????? Group IDs?"""
+    """获取知识星球 Group IDs。"""
     return _get_config_value("ZSXQ_GROUP_IDS", "zsxq_group_ids")
 
 
 def get_zsxq_api_timeout() -> float:
-    """?????? API ?????"""
+    """获取知识星球 API 超时时间。"""
     value = _get_config_value("ZSXQ_API_TIMEOUT", "zsxq_api_timeout")
     if not value:
         return 10.0
@@ -128,36 +132,6 @@ def get_zsxq_api_timeout() -> float:
         return float(value)
     except ValueError:
         return 10.0
-
-
-def get_supabase_url() -> str:
-    """获取 Supabase Project URL。"""
-    return _get_config_value("SUPABASE_URL", "supabase_url")
-
-
-def get_supabase_service_role_key() -> str:
-    """获取 Supabase service role key。"""
-    return _get_config_value(
-        "SUPABASE_SERVICE_ROLE_KEY",
-        "supabase_service_role_key",
-    )
-
-
-def get_supabase_timeout() -> float:
-    """获取 Supabase 请求超时时间。"""
-    value = _get_config_value("SUPABASE_TIMEOUT", "supabase_timeout")
-    if not value:
-        return 10.0
-
-    try:
-        return float(value)
-    except ValueError:
-        return 10.0
-
-
-def is_supabase_enabled() -> bool:
-    """判断是否启用 Supabase 双写。"""
-    return bool(get_supabase_url() and get_supabase_service_role_key())
 
 
 def get_mysql_host() -> str:
